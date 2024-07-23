@@ -1,0 +1,4 @@
+# create executable for each test, no testing libraries needed
+
+add_executable(basic basic.cpp)
+add_executable(variant variant.cpp)

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <isle/ir.h>
+#include <isle/visitors.h>
 
 /*
 (decl + (Int Int) Int)
@@ -63,59 +64,14 @@ void PrintEnv(const TypeEnv &type_env, const DeclEnv &decl_env) {
   std::cout << std::flush;
 }
 
-struct PatternPrinter : isle::PatternVisitor {
-  PatternPrinter(const DeclEnv &decl_env) : decl_env(decl_env) {}
-
-  void Visit(isle::PCall *pattern) override {
-    std::cout << "(" << decl_env.at(pattern->fn).name;
-    for (const isle::Ref<isle::Pattern> &arg : pattern->args) {
-      std::cout << " ";
-      arg->Accept(this);
-    }
-    std::cout << ")";
-  }
-
-  void Visit(isle::PWildcard *pattern) override { std::cout << "_"; }
-
-  void Visit(isle::Var *pattern) override { std::cout << pattern->name; }
-
-  void Visit(isle::IntConst *pattern) override { std::cout << pattern->value; }
-
-private:
-  const DeclEnv &decl_env;
-};
-
-struct ExprPrinter : isle::ExprVisitor {
-  ExprPrinter(const DeclEnv &decl_env) : decl_env(decl_env) {}
-
-  void Visit(isle::ECall *expr) override {
-    std::cout << "(" << decl_env.at(expr->fn).name;
-    for (const isle::Ref<isle::Expr> &arg : expr->args) {
-      std::cout << " ";
-      arg->Accept(this);
-    }
-    std::cout << ")";
-  }
-
-  void Visit(isle::Var *expr) override { std::cout << expr->name; }
-
-  void Visit(isle::IntConst *expr) override { std::cout << expr->value; }
-
-private:
-  const DeclEnv &decl_env;
-};
-
 void PrintRules(const std::vector<isle::Rule> &rules, const DeclEnv &decl_env) {
-  PatternPrinter pp(decl_env);
-  ExprPrinter ep(decl_env);
-
   std::cout << "Rules:\n";
   for (const isle::Rule &rule : rules) {
-    std::cout << "\t";
-    rule.pattern->Accept(&pp);
-    std::cout << " -> ";
-    rule.expr->Accept(&ep);
-    std::cout << "\n";
+    // std::cout << "\t" << isle::PatternPrinter(decl_env).str(rule.pattern)
+    //           << " -> " << isle::ExprPrinter(decl_env).str(rule.expr) <<
+    //           "\n";
+    std::cout << "\t" << isle::Printer::Print(rule.pattern) << " -> "
+              << isle::Printer::Print(rule.expr) << "\n";
   }
   std::cout << std::flush;
 }
@@ -137,18 +93,29 @@ int main(int argc, char **argv) {
 
   vector<Rule> rules;
 
-  Ref<Var> x = Var::Make("x");
-  Ref<IntConst> zero = IntConst::Make(0);
-  Ref<IntConst> one = IntConst::Make(1);
-  Ref<IntConst> two = IntConst::Make(2);
+  // Ref<Var> x = Var::Make("x");
+  // Ref<IntConst> zero = IntConst::Make(0);
+  // Ref<IntConst> one = IntConst::Make(1);
+  // Ref<IntConst> two = IntConst::Make(2);
 
-  rules.push_back(Rule{PCall::Make(plus, vector<Ref<Pattern>>{x, x}),
-                       ECall::Make(times, x, two)});
+  // rules.push_back(Rule{PCall::Make(plus, vector<Ref<Pattern>>{x, x}),
+  //                      ECall::Make(times, x, two)});
 
-  rules.push_back(Rule{PCall::Make(times, x, two), ECall::Make(shl, x, one)});
-  rules.push_back(Rule{PCall::Make(plus, x, zero), x});
-  rules.push_back(Rule{PCall::Make(times, x, one), x});
-  rules.push_back(Rule{PCall::Make(times, x, zero), zero});
+  // rules.push_back(Rule{PCall::Make(times, x, two), ECall::Make(shl, x,
+  // one)}); rules.push_back(Rule{PCall::Make(plus, x, zero), x});
+  // rules.push_back(Rule{PCall::Make(times, x, one), x});
+  // rules.push_back(Rule{PCall::Make(times, x, zero), zero});
+
+  Var x("x");
+  IntConst zero(0);
+  IntConst one(1);
+  IntConst two(2);
+
+  rules.push_back(Rule{PCall(plus, {x, x}), ECall(times, {x, two})});
+  rules.push_back(Rule{PCall(times, {x, two}), ECall(shl, {x, one})});
+  rules.push_back(Rule{PCall(plus, {x, zero}), x});
+  rules.push_back(Rule{PCall(times, {x, one}), x});
+  rules.push_back(Rule{PCall(times, {x, zero}), zero});
 
   PrintEnv(type_env, decl_env);
   PrintRules(rules, decl_env);
