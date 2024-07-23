@@ -56,6 +56,54 @@ private:
   std::ostringstream oss;
 };
 
+// Expr equality
+struct ExprEq {
+  bool operator()(const ECall &lhs) {
+    if (!std::holds_alternative<ECall>(rhs)) {
+      return false;
+    }
+    const ECall &rhs_e_call = std::get<ECall>(rhs);
+    if (lhs.fn != rhs_e_call.fn) {
+      return false;
+    }
+    if (lhs.args.size() != rhs_e_call.args.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < lhs.args.size(); ++i) {
+      if (!std::visit(ExprEq{rhs_e_call.args[i]}, lhs.args[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // TODO(@altanh): do we care about alpha equivalence?
+  bool operator()(const Var &lhs) {
+    if (!std::holds_alternative<Var>(rhs)) {
+      return false;
+    }
+    const Var &rhs_var = std::get<Var>(rhs);
+    return lhs.name == rhs_var.name;
+  }
+
+  bool operator()(const IntConst &lhs) {
+    if (!std::holds_alternative<IntConst>(rhs)) {
+      return false;
+    }
+    const IntConst &rhs_int_const = std::get<IntConst>(rhs);
+    return lhs.value == rhs_int_const.value;
+  }
+
+  ExprEq(const Expr &rhs) : rhs(rhs) {}
+
+  static bool Check(const Expr &lhs, const Expr &rhs) {
+    return std::visit(ExprEq{rhs}, lhs);
+  }
+
+private:
+  const Expr &rhs;
+};
+
 // Example: check if Expr has free variables
 
 struct HasFreeVars {
