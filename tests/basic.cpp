@@ -34,7 +34,7 @@ isle::Type RegisterType(TypeEnv *env, const std::string &name) {
   return id;
 }
 
-isle::Id DeclareFn(DeclEnv *env, const std::string &name,
+isle::Id DeclareFn(DeclEnv *env, const std::string &name, bool external,
                    const std::vector<isle::Type> &arg_types,
                    isle::Type ret_type) {
   // auto it = env->find(name);
@@ -42,9 +42,9 @@ isle::Id DeclareFn(DeclEnv *env, const std::string &name,
   //   return it->second.id;
   // }
   // TODO: do I want another table for looking up by name?
-  isle::FnDecl decl = {env->size(), name, arg_types, ret_type};
-  (*env)[decl.id] = decl;
-  return decl.id;
+  isle::Id id = env->size();
+  env->insert({id, isle::FnDecl{id, name, external, arg_types, ret_type}});
+  return id;
 }
 
 void PrintEnv(const TypeEnv &type_env, const DeclEnv &decl_env) {
@@ -87,24 +87,11 @@ int main(int argc, char **argv) {
 
   Type int_type = RegisterType(&type_env, "Int");
 
-  Id plus = DeclareFn(&decl_env, "+", {int_type, int_type}, int_type);
-  Id times = DeclareFn(&decl_env, "*", {int_type, int_type}, int_type);
-  Id shl = DeclareFn(&decl_env, "<<", {int_type, int_type}, int_type);
+  Id plus = DeclareFn(&decl_env, "+", false, {int_type, int_type}, int_type);
+  Id times = DeclareFn(&decl_env, "*", false, {int_type, int_type}, int_type);
+  Id shl = DeclareFn(&decl_env, "<<", false, {int_type, int_type}, int_type);
 
   vector<Rule> rules;
-
-  // Ref<Var> x = Var::Make("x");
-  // Ref<IntConst> zero = IntConst::Make(0);
-  // Ref<IntConst> one = IntConst::Make(1);
-  // Ref<IntConst> two = IntConst::Make(2);
-
-  // rules.push_back(Rule{PCall::Make(plus, vector<Ref<Pattern>>{x, x}),
-  //                      ECall::Make(times, x, two)});
-
-  // rules.push_back(Rule{PCall::Make(times, x, two), ECall::Make(shl, x,
-  // one)}); rules.push_back(Rule{PCall::Make(plus, x, zero), x});
-  // rules.push_back(Rule{PCall::Make(times, x, one), x});
-  // rules.push_back(Rule{PCall::Make(times, x, zero), zero});
 
   Var x("x");
   IntConst zero(0);

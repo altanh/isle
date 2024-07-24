@@ -15,8 +15,14 @@ using Type = int;
 struct FnDecl {
   Id id;
   std::string name;
+  bool external;
   std::vector<Type> arg_types;
   Type ret_type;
+
+  FnDecl(Id id, std::string name, bool external, std::vector<Type> arg_types,
+         Type ret_type)
+      : id(id), name(name), external(external), arg_types(arg_types),
+        ret_type(ret_type) {}
 };
 
 struct ECall;
