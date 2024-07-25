@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <isle/ir.h>
+#include <isle/visitors.h>
 
 namespace isle {
 
@@ -29,8 +30,8 @@ std::istream &operator>>(std::istream &is, SExpr &sexpr) {
   is >> std::ws >> c;
 
   if (is.eof()) {
-    std::cerr << "unexpected eof while parsing sexpr" << std::endl;
-    is.setstate(std::ios_base::failbit);
+    // std::cerr << "unexpected eof while parsing sexpr" << std::endl;
+    // is.setstate(std::ios_base::failbit);
     return is;
   }
 
@@ -138,7 +139,7 @@ std::ostream &operator<<(std::ostream &os, const SExpr &sexpr) {
 
 struct EnumOption {
   std::string name;
-  std::vector<std::pair<std::string, std::string>> fields;
+  std::vector<std::pair<std::string, Id>> fields;
 };
 
 using Enum = std::vector<EnumOption>;
@@ -158,10 +159,11 @@ struct TypeDecl {
 struct FnDecl {
   Id id;
   std::string name;
+  bool external;
   std::optional<std::string> ctor;
   std::optional<std::string> xtor;
-  std::vector<std::string> arg_types;
-  std::string ret_type;
+  std::vector<Id> arg_types;
+  Id ret_type;
 };
 
 struct Program {
@@ -170,22 +172,62 @@ struct Program {
   std::unordered_map<Id, std::string> fn_names;
   std::unordered_map<std::string, Id> fn_ids;
 
-  std::vector<TypeDecl> type_decls;
-  std::vector<FnDecl> fn_decls;
+  std::vector<TypeDecl> type_decls; // indexed by Id
+  std::vector<FnDecl> fn_decls;     // indexed by Id
+  std::vector<Rule> rules;
+
+  void Print() const {
+    std::cout << "declared types:\n";
+    for (int i = 0; i < type_decls.size(); ++i) {
+      const auto &ty = type_decls[i];
+      std::cout << "\t" << i << ": " << ty.id << " " << ty.name << " "
+                << ty.kind << "\n";
+      // TODO print enum
+      if (ty.kind != TypeDecl::Kind::Primitive) {
+        for (const auto &opt : ty.options.value()) {
+          std::cout << "\t\t" << opt.name << "\n";
+          for (const auto &field : opt.fields) {
+            std::cout << "\t\t\t" << field.first << ": " << field.second
+                      << std::endl;
+          }
+        }
+      }
+    }
+    std::cout << "declared funcs:\n";
+    for (int i = 0; i < fn_decls.size(); ++i) {
+      const auto &fn = fn_decls[i];
+      std::cout << "\t" << i << ": " << fn.id << " " << fn.name << " "
+                << fn.external << " " << fn.ctor.value_or("n/a") << " "
+                << fn.xtor.value_or("n/a") << " (";
+      if (!fn.arg_types.empty()) {
+        std::cout << fn.arg_types[0];
+        for (int j = 1; j < fn.arg_types.size(); ++j) {
+          std::cout << " " << fn.arg_types[j];
+        }
+      }
+      std::cout << ") " << fn.ret_type << "\n";
+    }
+    std::cout << "rules:\n";
+    for (const auto &rule : rules) {
+      std::cout << "\t" << rule.pattern << " -> " << rule.expr << "\n";
+    }
+    std::cout << std::flush;
+  }
 };
 
-std::optional<EnumOption> ParseEnumOption(const SExpr &sexpr) {
+std::optional<EnumOption> ParseEnumOption(const Program &program,
+                                          const SExpr &sexpr) {
   const SList *opt = std::get_if<SList>(&sexpr);
   if (!opt) {
     std::cerr << "error: expected enum option definition: " << sexpr
               << std::endl;
-    return std::nullopt;
+    return {};
   }
 
   if (opt->size() < 1 || !std::holds_alternative<SIdent>(opt->front())) {
     std::cerr << "error: expected identifier for enum option name: " << sexpr
               << std::endl;
-    return std::nullopt;
+    return {};
   }
 
   EnumOption result;
@@ -198,32 +240,39 @@ std::optional<EnumOption> ParseEnumOption(const SExpr &sexpr) {
         !std::holds_alternative<SIdent>(field->back())) {
       std::cerr << "error: expected field definition: " << (*opt)[i]
                 << std::endl;
-      return std::nullopt;
+      return {};
     }
-    result.fields.emplace_back((*field)[0], (*field)[1]);
+    const auto &type_name = std::get<SIdent>(field->back());
+    auto it = program.type_ids.find(type_name);
+    if (it == program.type_ids.end()) {
+      std::cerr << "error: undeclared type \"" << type_name
+                << "\" in enum definition: " << sexpr << std::endl;
+      return {};
+    }
+    result.fields.emplace_back(std::get<SIdent>(field->front()), it->second);
   }
 
   return result;
 }
 
-std::optional<Enum> ParseEnum(const SExpr &sexpr) {
+std::optional<Enum> ParseEnum(const Program &program, const SExpr &sexpr) {
   const SList *enum_ = std::get_if<SList>(&sexpr);
   if (!enum_) {
     std::cerr << "error: expected enum definition: " << sexpr << std::endl;
-    return std::nullopt;
+    return {};
   }
   if (enum_->size() < 1 || !std::holds_alternative<SIdent>(enum_->front()) ||
       std::get<SIdent>(enum_->front()) != "enum") {
     std::cerr << "error: expected \"enum\" in enum definition: " << sexpr
               << std::endl;
-    return std::nullopt;
+    return {};
   }
   // (1) flat list of identifiers
   // (2) list of enum options
   if (enum_->size() < 2) {
     std::cerr << "error: expected at least one variant in enum definition: "
               << sexpr << std::endl;
-    return std::nullopt;
+    return {};
   }
   Enum result;
   if (std::holds_alternative<SIdent>((*enum_)[1])) {
@@ -233,17 +282,17 @@ std::optional<Enum> ParseEnum(const SExpr &sexpr) {
       if (!option_name) {
         std::cerr << "error: expected identifier for option name: " << sexpr
                   << std::endl;
-        return std::nullopt;
+        return {};
       }
-      result.emplace_back(option_name,
-                          std::vector<std::pair<std::string, std::string>>{});
+      result.emplace_back(
+          EnumOption{*option_name, std::vector<std::pair<std::string, Id>>{}});
     }
   } else {
     // case (2)
     for (int i = 1; i < enum_->size(); ++i) {
-      auto opt = ParseEnumOption((*enum_)[i]);
-      if (!opt.has_value()) {
-        return std::nullopt;
+      auto opt = ParseEnumOption(program, (*enum_)[i]);
+      if (!opt) {
+        return {};
       }
       result.push_back(opt.value());
     }
@@ -258,52 +307,52 @@ std::optional<TypeDecl> ParseTypeDecl(const SList &stmt, Program *program) {
   if (stmt.size() < 2) {
     std::cerr << "error: expected identifier in type declaration: "
               << static_cast<SExpr>(stmt) << std::endl;
-    return std::nullopt;
+    return {};
   }
   const SIdent *ident = std::get_if<SIdent>(&stmt[1]);
   if (!ident) {
     std::cerr << "error: expected identifier in type declaration: " << stmt
               << std::endl;
-    return std::nullopt;
+    return {};
   }
   // check that the type hasn't already been declared
   if (program->type_ids.count(*ident)) {
     std::cerr << "error: type has already been declared: " << stmt << std::endl;
-    return std::nullopt;
+    return {};
   }
   type_decl.name = *ident;
 
   if (stmt.size() < 3) {
     std::cerr << "error: expected type to be an enum or a primitive: " << stmt
               << std::endl;
-    return std::nullopt;
+    return {};
   }
   ident = std::get_if<SIdent>(&stmt[2]);
 
   if (!ident) {
     // try to parse internal enum
     type_decl.kind = TypeDecl::Kind::Internal;
-    type_decl.options = ParseEnum(stmt[2]);
-    if (!type_decl.options.has_value()) {
-      return std::nullopt;
+    type_decl.options = ParseEnum(*program, stmt[2]);
+    if (!type_decl.options) {
+      return {};
     }
-  } else if (*ident == "external") {
+  } else if (*ident == "extern") {
     type_decl.kind = TypeDecl::Kind::External;
     if (stmt.size() != 4) {
       std::cerr << "error: missing enum definition: " << stmt << std::endl;
-      return std::nullopt;
+      return {};
     }
-    type_decl.options = ParseEnum(stmt[3]);
-    if (!type_decl.options.has_value()) {
-      return std::nullopt;
+    type_decl.options = ParseEnum(*program, stmt[3]);
+    if (!type_decl.options) {
+      return {};
     }
   } else if (*ident == "primitive") {
     type_decl.kind = TypeDecl::Kind::Primitive;
-    type_decl.options = std::nullopt;
+    type_decl.options = {};
   } else {
     std::cerr << "error: unexpected identifier \"" << *ident << "\": " << stmt
               << std::endl;
-    return std::nullopt;
+    return {};
   }
 
   program->type_names.insert({type_decl.id, type_decl.name});
@@ -312,19 +361,314 @@ std::optional<TypeDecl> ParseTypeDecl(const SList &stmt, Program *program) {
   return type_decl;
 }
 
+std::optional<FnDecl> ParseFnDecl(const SList &stmt, Program *program) {
+  if (stmt.size() < 4) {
+    std::cerr << "error: function declaration must have name, argument types, "
+                 "and return type: "
+              << stmt << std::endl;
+    return {};
+  }
+
+  FnDecl result;
+  result.id = program->fn_decls.size();
+  result.external = false;
+
+  int i = 1;
+
+  const SIdent *ident = std::get_if<SIdent>(&stmt[i]);
+  if (!ident) {
+    std::cerr << "error: expected identifier: " << stmt << std::endl;
+    return {};
+  }
+  if (*ident == "extern") {
+    result.external = true;
+    if (stmt.size() != 5) {
+      std::cerr
+          << "error: function declaration must have name, argument types, "
+             "and return type: "
+          << stmt << std::endl;
+      return {};
+    }
+    ++i;
+    ident = std::get_if<SIdent>(&stmt[i]);
+    if (!ident) {
+      std::cerr << "error: expected identifier: " << stmt << std::endl;
+      return {};
+    }
+  }
+  result.name = *ident;
+
+  // parse argument types
+  ++i;
+  const SList *arg_types = std::get_if<SList>(&stmt[i]);
+  if (!arg_types) {
+    std::cerr << "error: expected list of argument types: " << stmt
+              << std::endl;
+    return {};
+  }
+  for (int j = 0; j < arg_types->size(); ++j) {
+    ident = std::get_if<SIdent>(&(*arg_types)[j]);
+    if (!ident) {
+      std::cerr << "error: expected identifier in argument types: " << stmt
+                << std::endl;
+      return {};
+    }
+    // lookup type
+    if (!program->type_ids.count(*ident)) {
+      // TODO(@altanh): should this be 2-phase to enable out of order parsing?
+      std::cerr << "error: undeclared type \"" << *ident
+                << "\" in function declaration: " << stmt << std::endl;
+      return {};
+    }
+    result.arg_types.push_back(program->type_ids.at(*ident));
+  }
+
+  // parse return type
+  ++i;
+  ident = std::get_if<SIdent>(&stmt[i]);
+  if (!ident) {
+    std::cerr << "error: expected identifier in return type:" << stmt
+              << std::endl;
+    return {};
+  }
+  // lookup type
+  if (!program->type_ids.count(*ident)) {
+    // TODO(@altanh): should this be 2-phase to enable out of order parsing?
+    std::cerr << "error: undeclared type \"" << *ident
+              << "\" in function declaration: " << stmt << std::endl;
+    return {};
+  }
+  result.ret_type = program->type_ids.at(*ident);
+
+  program->fn_names.insert({result.id, result.name});
+  program->fn_ids.insert({result.name, result.id});
+
+  return result;
+}
+
+std::optional<std::string>
+ParseExtern(const SList &stmt, const std::string &kind, Program *program) {
+  if (stmt.size() != 3) {
+    std::cerr << "error: expected function identifier and extern string: "
+              << stmt << std::endl;
+    return {};
+  }
+  const SIdent *ident = std::get_if<SIdent>(&stmt[1]);
+  if (!ident) {
+    std::cerr << "error: expected function identifier: " << stmt << std::endl;
+    return {};
+  }
+  // lookup function
+  auto it = program->fn_ids.find(*ident);
+  if (it == program->fn_ids.end()) {
+    std::cerr << "error: undeclared function in extern declaration: " << stmt
+              << std::endl;
+    return {};
+  }
+  // check function is extern
+  auto &fn = program->fn_decls[it->second];
+  if (!fn.external) {
+    std::cerr
+        << "error: function in extern declaration is not declared extern: "
+        << stmt << std::endl;
+    return {};
+  }
+
+  // parse the extern
+  ident = std::get_if<SIdent>(&stmt[2]);
+  if (!ident) {
+    std::cerr << "error: expected string for extern declaration: " << stmt
+              << std::endl;
+    return {};
+  }
+  // very basic sanity check quotes
+  if (ident->size() < 3 || ident->front() != '"' || ident->back() != '"') {
+    std::cerr << "error: expected (nonempty) string for extern declaration: "
+              << stmt << std::endl;
+    return {};
+  }
+  std::string str = ident->substr(1, ident->size() - 2);
+
+  // attach
+  if (kind == "constructor") {
+    // check not already declared
+    if (fn.ctor) {
+      std::cerr << "error: function \"" << fn.name
+                << "\" has previously declared extern constructor \""
+                << fn.ctor.value() << "\": " << stmt << std::endl;
+      return {};
+    }
+    fn.ctor = str;
+  } else {
+    // check not already declared
+    if (fn.xtor) {
+      std::cerr << "error: function \"" << fn.name
+                << "\" has previously declared extern extractor \""
+                << fn.ctor.value() << "\": " << stmt << std::endl;
+      return {};
+    }
+    fn.xtor = str;
+  }
+
+  return str;
+}
+
+std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
+                                    bool root) {
+  return std::visit(
+      Visitor{
+          [&](const SList &list) -> std::optional<Pattern> {
+            if (list.size() < 1) {
+              std::cerr << "error: empty list in pattern: " << sexpr
+                        << std::endl;
+              return {};
+            }
+            const SIdent *ident = std::get_if<SIdent>(&list[0]);
+            if (!ident) {
+              std::cerr
+                  << "error: expected function identifier in pattern but got "
+                  << list[0] << ": " << sexpr << std::endl;
+              return {};
+            }
+            // lookup function
+            auto it = program.fn_ids.find(*ident);
+            if (it == program.fn_ids.end()) {
+              std::cerr << "error: undeclared function \"" << *ident
+                        << "\" in pattern: " << sexpr << std::endl;
+              return {};
+            }
+            PCall result(it->second, {});
+            // parse children
+            for (int i = 1; i < list.size(); ++i) {
+              auto c = ParsePattern(program, list[i], false);
+              if (!c) {
+                return {};
+              }
+              // TODO(@altanh): does this moving do what I think it does? maybe
+              // should just box children
+              result.args.emplace_back(std::move(c.value()));
+            }
+            return result;
+          },
+          [&](const SIdent &ident) -> std::optional<Pattern> {
+            if (root) {
+              std::cerr << "error: expected call at pattern root, but got "
+                        << sexpr << std::endl;
+              return {};
+            }
+            if (ident == "_") {
+              return PWildcard();
+            }
+            return Var(ident);
+          },
+          [&](const SInt &i) -> std::optional<Pattern> {
+            if (root) {
+              std::cerr << "error: expected call at pattern root, but got "
+                        << sexpr << std::endl;
+              return {};
+            }
+            return IntConst(i);
+          }},
+      sexpr);
+}
+
+std::optional<Expr> ParseExpr(const Program &program, const SExpr &sexpr,
+                              bool root) {
+  return std::visit(
+      Visitor{[&](const SList &list) -> std::optional<Expr> {
+                if (list.size() < 1) {
+                  std::cerr << "error: empty list in expr: " << sexpr
+                            << std::endl;
+                  return {};
+                }
+                const SIdent *ident = std::get_if<SIdent>(&list[0]);
+                if (!ident) {
+                  std::cerr
+                      << "error: expected function identifier in expr but got "
+                      << list[0] << ": " << sexpr << std::endl;
+                  return {};
+                }
+                // lookup function
+                auto it = program.fn_ids.find(*ident);
+                if (it == program.fn_ids.end()) {
+                  std::cerr << "error: undeclared function \"" << *ident
+                            << "\" in expr: " << sexpr << std::endl;
+                  return {};
+                }
+                ECall result(it->second, {});
+                // parse children
+                for (int i = 1; i < list.size(); ++i) {
+                  auto c = ParseExpr(program, list[i], false);
+                  if (!c) {
+                    return {};
+                  }
+                  result.args.emplace_back(std::move(c.value()));
+                }
+                return result;
+              },
+              [&](const SIdent &ident) -> std::optional<Expr> {
+                if (root) {
+                  std::cerr << "error: expected call at expr root, but got "
+                            << sexpr << std::endl;
+                  return {};
+                }
+                return Var(ident);
+              },
+              [&](const SInt &i) -> std::optional<Expr> {
+                if (root) {
+                  std::cerr << "error: expected call at expr root, but got "
+                            << sexpr << std::endl;
+                  return {};
+                }
+                return IntConst(i);
+              }},
+      sexpr);
+}
+
+std::optional<Rule> ParseRule(const Program &program, const SList &stmt) {
+  if (stmt.size() != 3) {
+    std::cerr << "error: expected pattern and expression in rule: " << stmt
+              << std::endl;
+    return {};
+  }
+
+  auto pat = ParsePattern(program, stmt[1], true);
+  auto expr = ParseExpr(program, stmt[2], true);
+
+  if (!pat) {
+    std::cerr << "error: failed to parse pattern" << std::endl;
+    return {};
+  }
+  if (!expr) {
+    std::cerr << "error: failed to parse expr" << std::endl;
+    return {};
+  }
+
+  // check rule wellformedness
+  std::unordered_map<std::string, int> bindings;
+  CollectVars(pat.value(), &bindings);
+  if (HasFreeVars(expr.value(), bindings)) {
+    std::cerr << "error: expr contains unbound variables: " << stmt
+              << std::endl;
+    return {};
+  }
+
+  return Rule(pat.value(), expr.value());
+}
+
 /// parse a program from a list of s-expressions
-std::optional<Program> ParseProgram(const SList &sexprs) {
+std::optional<Program> ParseProgram(const std::vector<SExpr> &sexprs) {
   Program program;
   for (const SExpr &sexpr : sexprs) {
     const SList *stmt = std::get_if<SList>(&sexpr);
     if (!stmt) {
       std::cerr << "error: expected statement, got " << sexpr << std::endl;
-      return std::nullopt;
+      return {};
     }
 
     if (stmt->empty()) {
       std::cerr << "error: empty statement" << std::endl;
-      return std::nullopt;
+      return {};
     }
 
     // get head
@@ -332,31 +676,53 @@ std::optional<Program> ParseProgram(const SList &sexprs) {
     if (!ident) {
       std::cerr << "error: expected identifier in statement head: " << sexpr
                 << std::endl;
-      return std::nullopt;
+      return {};
     }
 
     if (*ident == "type") {
       // decl-type
       auto type_decl = ParseTypeDecl(*stmt, &program);
-      if (!type_decl.has_value()) {
+      if (!type_decl) {
         std::cerr << "error: failed to parse type declaration" << std::endl;
-        return std::nullopt;
+        return {};
       }
       // TODO: maybe just put this in ParseTypeDecl
       program.type_decls.push_back(type_decl.value());
     } else if (*ident == "decl") {
-      // decl-fn
+      auto fn_decl = ParseFnDecl(*stmt, &program);
+      if (!fn_decl) {
+        std::cerr << "error: failed to parse function declaration" << std::endl;
+        return {};
+      }
+      // TODO
+      program.fn_decls.push_back(fn_decl.value());
     } else if (*ident == "constructor") {
       // ctor
+      if (!ParseExtern(*stmt, "constructor", &program)) {
+        std::cerr << "error: failed to parse extern constructor declaration"
+                  << std::endl;
+        return {};
+      }
     } else if (*ident == "extractor") {
       // xtor
+      if (!ParseExtern(*stmt, "extractor", &program)) {
+        std::cerr << "error: failed to parse extern extractor declaration"
+                  << std::endl;
+        return {};
+      }
     } else if (*ident == "rule") {
-      // rule
+      auto rule = ParseRule(program, *stmt);
+      if (!rule) {
+        std::cerr << "error: failed to parse rule: " << sexpr << std::endl;
+        return {};
+      }
+      program.rules.emplace_back(std::move(rule.value()));
     } else {
       std::cerr << "error: unknown statement kind: " << sexpr << std::endl;
-      return std::nullopt;
+      return {};
     }
   }
+  return program;
 }
 
 } // namespace isle

@@ -10,20 +10,21 @@
 namespace isle {
 
 using Id = int;
-using Type = int;
 
-struct FnDecl {
-  Id id;
-  std::string name;
-  bool external;
-  std::vector<Type> arg_types;
-  Type ret_type;
+// using Type = int;
 
-  FnDecl(Id id, std::string name, bool external, std::vector<Type> arg_types,
-         Type ret_type)
-      : id(id), name(name), external(external), arg_types(arg_types),
-        ret_type(ret_type) {}
-};
+// struct FnDecl {
+//   Id id;
+//   std::string name;
+//   bool external;
+//   std::vector<Type> arg_types;
+//   Type ret_type;
+
+//   FnDecl(Id id, std::string name, bool external, std::vector<Type> arg_types,
+//          Type ret_type)
+//       : id(id), name(name), external(external), arg_types(arg_types),
+//         ret_type(ret_type) {}
+// };
 
 struct ECall;
 struct PCall;
@@ -67,6 +68,8 @@ struct IntConst {
 struct Rule {
   Pattern pattern;
   Expr expr;
+
+  Rule(Pattern pattern, Expr expr) : pattern(pattern), expr(expr) {}
 };
 
 /// Generic visitor

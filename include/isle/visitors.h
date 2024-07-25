@@ -56,6 +56,16 @@ private:
   std::ostringstream oss;
 };
 
+std::ostream &operator<<(std::ostream &os, const Expr &expr) {
+  os << Printer::Print(expr);
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const Pattern &pattern) {
+  os << Printer::Print(pattern);
+  return os;
+}
+
 // Expr equality
 struct ExprEq {
   bool operator()(const ECall &lhs) {
@@ -106,20 +116,33 @@ private:
 
 // Example: check if Expr has free variables
 
-struct HasFreeVars {
-  bool operator()(const Var &var) const { return true; }
-  bool operator()(const IntConst &int_const) const { return false; }
-  bool operator()(const ECall &e_call) const {
-    bool res = false;
-    for (const Expr &arg : e_call.args) {
-      res |= std::visit(*this, arg);
-    }
-    return res;
-  }
+bool HasFreeVars(const Expr &expr,
+                 const std::unordered_map<std::string, int> &bindings) {
+  return std::visit(
+      Visitor{[&](const ECall &call) {
+                for (auto arg : call.args) {
+                  if (HasFreeVars(arg, bindings)) {
+                    return true;
+                  }
+                }
+                return false;
+              },
+              [&](const Var &var) { return !bindings.count(var.name); },
+              [&](const IntConst &i) { return false; }},
+      expr);
+}
 
-  static bool Check(const Expr &expr) {
-    return std::visit(HasFreeVars{}, expr);
-  }
-};
+void CollectVars(const Pattern &pat,
+                 std::unordered_map<std::string, int> *result) {
+  std::visit(Visitor{[&](const PCall &call) {
+                       for (auto arg : call.args) {
+                         CollectVars(arg, result);
+                       }
+                     },
+                     [&](const PWildcard &w) {},
+                     [&](const Var &var) { result->operator[](var.name)++; },
+                     [&](const IntConst &i) {}},
+             pat);
+}
 
 } // namespace isle

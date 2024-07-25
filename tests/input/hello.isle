@@ -1,0 +1,10 @@
+(type int primitive)
+
+(type Foo (enum A B C))
+(type Bar (enum (X (x int)) (Y (y Foo))))
+(type BinOp extern (enum Add Mul))
+
+(decl + (int int) int)
+(decl * (int int) int)
+
+(rule (+ x x) (* x 2))

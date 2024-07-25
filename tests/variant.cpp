@@ -12,8 +12,8 @@ int main(int argc, char **argv) {
   Expr fv3 = ECall(0, {Var("y"), IntConst(1)});
 
   std::cout << std::boolalpha;
-  std::cout << std::visit(HasFreeVars{}, no_fv) << "\n";
-  std::cout << std::visit(HasFreeVars{}, fv) << "\n";
+  std::cout << HasFreeVars(no_fv, {}) << "\n";
+  std::cout << HasFreeVars(fv, {}) << "\n";
   std::cout << std::flush;
 
   std::cout << Printer::Print(no_fv) << std::endl;
