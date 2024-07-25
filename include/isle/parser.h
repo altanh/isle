@@ -8,8 +8,8 @@
 #include <variant>
 #include <vector>
 
-#include <isle/ir.h>
-#include <isle/visitors.h>
+#include "ir.h"
+#include "visitors.h"
 
 namespace isle {
 
@@ -35,14 +35,19 @@ std::istream &operator>>(std::istream &is, SExpr &sexpr) {
     return is;
   }
 
-  if (c == '(') {
+  if (c == ';') {
+    // skip until end of line
+    std::string tmp;
+    std::getline(is, tmp, '\n');
+    return (is >> sexpr);
+  } else if (c == '(') {
     SList exprs;
     while (is.peek() != ')') {
       // check eof
       if (is.peek() == EOF) {
         std::cerr << "error: unexpected eof while parsing sexpr, expected ')'"
                   << std::endl;
-        is.setstate(std::ios_base::failbit);
+        is.setstate(std::ios_base::badbit);
         return is;
       }
       SExpr expr;
@@ -64,7 +69,7 @@ std::istream &operator>>(std::istream &is, SExpr &sexpr) {
     // check for errors
     if (is.peek() != ')' && !std::isspace(is.peek())) {
       std::cerr << "error: expected int, got something else" << std::endl;
-      is.setstate(std::ios_base::failbit);
+      is.setstate(std::ios_base::badbit);
       return is;
     }
     sexpr = i;
@@ -77,7 +82,7 @@ std::istream &operator>>(std::istream &is, SExpr &sexpr) {
     sexpr = ident.str();
   } else {
     std::cerr << "error: unexpected ')' while parsing sexpr" << std::endl;
-    is.setstate(std::ios_base::failbit);
+    is.setstate(std::ios_base::badbit);
   }
   return is;
 }
@@ -136,84 +141,6 @@ std::ostream &operator<<(std::ostream &os, const SExpr &sexpr) {
  *
  * program ::= stmt*
  */
-
-struct EnumOption {
-  std::string name;
-  std::vector<std::pair<std::string, Id>> fields;
-};
-
-using Enum = std::vector<EnumOption>;
-
-struct TypeDecl {
-  Id id;
-  std::string name;
-  enum Kind {
-    Internal,
-    External,
-    Primitive,
-  } kind;
-  // TODO(@altanh): merge with kind and make variant
-  std::optional<Enum> options;
-};
-
-struct FnDecl {
-  Id id;
-  std::string name;
-  bool external;
-  std::optional<std::string> ctor;
-  std::optional<std::string> xtor;
-  std::vector<Id> arg_types;
-  Id ret_type;
-};
-
-struct Program {
-  std::unordered_map<Id, std::string> type_names;
-  std::unordered_map<std::string, Id> type_ids;
-  std::unordered_map<Id, std::string> fn_names;
-  std::unordered_map<std::string, Id> fn_ids;
-
-  std::vector<TypeDecl> type_decls; // indexed by Id
-  std::vector<FnDecl> fn_decls;     // indexed by Id
-  std::vector<Rule> rules;
-
-  void Print() const {
-    std::cout << "declared types:\n";
-    for (int i = 0; i < type_decls.size(); ++i) {
-      const auto &ty = type_decls[i];
-      std::cout << "\t" << i << ": " << ty.id << " " << ty.name << " "
-                << ty.kind << "\n";
-      // TODO print enum
-      if (ty.kind != TypeDecl::Kind::Primitive) {
-        for (const auto &opt : ty.options.value()) {
-          std::cout << "\t\t" << opt.name << "\n";
-          for (const auto &field : opt.fields) {
-            std::cout << "\t\t\t" << field.first << ": " << field.second
-                      << std::endl;
-          }
-        }
-      }
-    }
-    std::cout << "declared funcs:\n";
-    for (int i = 0; i < fn_decls.size(); ++i) {
-      const auto &fn = fn_decls[i];
-      std::cout << "\t" << i << ": " << fn.id << " " << fn.name << " "
-                << fn.external << " " << fn.ctor.value_or("n/a") << " "
-                << fn.xtor.value_or("n/a") << " (";
-      if (!fn.arg_types.empty()) {
-        std::cout << fn.arg_types[0];
-        for (int j = 1; j < fn.arg_types.size(); ++j) {
-          std::cout << " " << fn.arg_types[j];
-        }
-      }
-      std::cout << ") " << fn.ret_type << "\n";
-    }
-    std::cout << "rules:\n";
-    for (const auto &rule : rules) {
-      std::cout << "\t" << rule.pattern << " -> " << rule.expr << "\n";
-    }
-    std::cout << std::flush;
-  }
-};
 
 std::optional<EnumOption> ParseEnumOption(const Program &program,
                                           const SExpr &sexpr) {
@@ -530,6 +457,36 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
                   << list[0] << ": " << sexpr << std::endl;
               return {};
             }
+
+            // special case: "@" for binding subpatterns
+            if (*ident == "@") {
+              if (root) {
+                std::cerr << "error: expected call pattern at root, but got "
+                          << sexpr << std::endl;
+                return {};
+              }
+              // (@ var subpattern)
+              if (list.size() != 3) {
+                std::cerr << "error: expected variable and subpattern in "
+                             "subpattern binding: "
+                          << sexpr << std::endl;
+                return {};
+              }
+              ident = std::get_if<SIdent>(&list[1]);
+              if (!ident) {
+                std::cerr << "error: expected variable identifier in "
+                             "subpattern binding: "
+                          << sexpr << std::endl;
+                return {};
+              }
+              auto subpattern = ParsePattern(program, list[2], false);
+              if (!subpattern) {
+                return {};
+              }
+              return PBind(Var(*ident),
+                           std::make_shared<Pattern>(subpattern.value()));
+            }
+
             // lookup function
             auto it = program.fn_ids.find(*ident);
             if (it == program.fn_ids.end()) {
@@ -544,9 +501,7 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
               if (!c) {
                 return {};
               }
-              // TODO(@altanh): does this moving do what I think it does? maybe
-              // should just box children
-              result.args.emplace_back(std::move(c.value()));
+              result.args.push_back(std::make_shared<Pattern>(c.value()));
             }
             return result;
           },
@@ -602,7 +557,7 @@ std::optional<Expr> ParseExpr(const Program &program, const SExpr &sexpr,
                   if (!c) {
                     return {};
                   }
-                  result.args.emplace_back(std::move(c.value()));
+                  result.args.push_back(std::make_shared<Expr>(c.value()));
                 }
                 return result;
               },

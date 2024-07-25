@@ -1,0 +1,24 @@
+(type E primitive)
+(type int primitive)
+
+(decl var (int) E)
+(decl lam (E E) E)
+(decl app (E E) E)
+
+(decl eval (E) E)
+
+(decl extern mk-lam (int E) E)
+(extractor mk-lam "MakeLam")
+
+(decl extern subst (int E E) E)
+(constructor subst "Subst")
+
+(rule (eval (lam (var i) e))
+  (mk-lam i (eval e)))
+
+(rule (eval (app (@ x (lam (var i) e1)) e2))
+  (subst i (eval e2) (eval e1)))
+
+; how is the initial term represented in memory? where does it come from?
+
+; (foo (@ x (bar _)) (baz x))

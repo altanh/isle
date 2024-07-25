@@ -25,10 +25,19 @@ struct Matcher {
     }
     // match args
     for (size_t i = 0; i < p_call.args.size(); ++i) {
-      if (!std::visit(Matcher{e_call.args[i], bindings}, p_call.args[i])) {
+      if (!std::visit(Matcher{*e_call.args[i], bindings}, *p_call.args[i])) {
         return false;
       }
     }
+    return true;
+  }
+
+  bool operator()(const PBind &p_bind) {
+    // try to match subpattern, then bind to variable
+    if (!std::visit(Matcher{expr, bindings}, *p_bind.pattern)) {
+      return false;
+    }
+    bindings->emplace(p_bind.var.name, expr);
     return true;
   }
 

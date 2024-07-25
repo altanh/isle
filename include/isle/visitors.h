@@ -10,20 +10,25 @@ namespace isle {
 struct Printer {
   void operator()(const ECall &e_call) {
     oss << "($" << e_call.fn;
-    for (const Expr &arg : e_call.args) {
+    for (const ExprRef &arg : e_call.args) {
       oss << " ";
-      std::visit(*this, arg);
+      std::visit(*this, *arg);
     }
     oss << ")";
   }
 
   void operator()(const PCall &p_call) {
     oss << "($" << p_call.fn;
-    for (const Pattern &arg : p_call.args) {
+    for (const PatternRef &arg : p_call.args) {
       oss << " ";
-      std::visit(*this, arg);
+      std::visit(*this, *arg);
     }
     oss << ")";
+  }
+
+  void operator()(const PBind &p_bind) {
+    oss << p_bind.var.name << "@";
+    std::visit(*this, *p_bind.pattern);
   }
 
   void operator()(const PWildcard &p_wildcard) { oss << "_"; }
@@ -80,7 +85,7 @@ struct ExprEq {
       return false;
     }
     for (size_t i = 0; i < lhs.args.size(); ++i) {
-      if (!std::visit(ExprEq{rhs_e_call.args[i]}, lhs.args[i])) {
+      if (!std::visit(ExprEq{*rhs_e_call.args[i]}, *lhs.args[i])) {
         return false;
       }
     }
@@ -121,7 +126,7 @@ bool HasFreeVars(const Expr &expr,
   return std::visit(
       Visitor{[&](const ECall &call) {
                 for (auto arg : call.args) {
-                  if (HasFreeVars(arg, bindings)) {
+                  if (HasFreeVars(*arg, bindings)) {
                     return true;
                   }
                 }
@@ -136,8 +141,12 @@ void CollectVars(const Pattern &pat,
                  std::unordered_map<std::string, int> *result) {
   std::visit(Visitor{[&](const PCall &call) {
                        for (auto arg : call.args) {
-                         CollectVars(arg, result);
+                         CollectVars(*arg, result);
                        }
+                     },
+                     [&](const PBind &bind) {
+                       result->operator[](bind.var.name)++;
+                       CollectVars(*bind.pattern, result);
                      },
                      [&](const PWildcard &w) {},
                      [&](const Var &var) { result->operator[](var.name)++; },

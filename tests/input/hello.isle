@@ -1,4 +1,5 @@
 (type int primitive)
+(type void primitive)
 
 (type Foo (enum A B C))
 (type Bar (enum (X (x int)) (Y (y Foo))))
@@ -6,5 +7,6 @@
 
 (decl + (int int) int)
 (decl * (int int) int)
+(decl extern iprint (int) void)
 
 (rule (+ x x) (* x 2))

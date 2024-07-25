@@ -11,13 +11,20 @@ int main(int argc, char **argv) {
   IntConst zero(0);
   IntConst one(1);
 
-  Pattern pat = PCall(0, {x, one});
-  Pattern pat2 = PCall(0, {one, one});
-  Pattern pat3 = PCall(0, {x, x});
+  PatternRef px = x.Clone();
+  PatternRef pzero = zero.Clone();
+  PatternRef pone = one.Clone();
+  ExprRef ex = x.Clone();
+  ExprRef ezero = zero.Clone();
+  ExprRef eone = one.Clone();
 
-  Expr expr = ECall(0, {zero, one});
-  Expr expr2 = ECall(0, {one, one});
-  Expr expr3 = ECall(0, {zero, zero});
+  Pattern pat = PCall(0, {px, pone});
+  Pattern pat2 = PCall(0, {pone, pone});
+  Pattern pat3 = PCall(0, {px, px});
+
+  Expr expr = ECall(0, {ezero, eone});
+  Expr expr2 = ECall(0, {eone, eone});
+  Expr expr3 = ECall(0, {ezero, ezero});
 
   using Test = std::tuple<Pattern, Expr, bool>;
   std::vector tests = {

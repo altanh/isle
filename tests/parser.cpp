@@ -1,3 +1,4 @@
+#include <isle/gen.h>
 #include <isle/parser.h>
 
 #include <fstream>
@@ -11,6 +12,10 @@ int main(int argc, char **argv) {
   SExpr sexpr;
   while (std::cin >> sexpr) {
     sexprs.push_back(sexpr);
+  }
+  if (std::cin.bad()) {
+    std::cerr << "failed to parse s-expression!" << std::endl;
+    return 1;
   }
 
   std::cout << "input program\n";
@@ -29,6 +34,12 @@ int main(int argc, char **argv) {
     return 1;
   }
   prog.value().Print();
+
+  std::cout << "generated code:\n";
+  for (const auto &td : prog.value().type_decls) {
+    EmitTypeDecl(prog.value(), td, std::cout);
+  }
+  std::cout << std::flush;
 
   return 0;
 }
