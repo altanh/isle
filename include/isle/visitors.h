@@ -61,6 +61,16 @@ private:
   std::ostringstream oss;
 };
 
+std::ostream &operator<<(std::ostream &os, const Var &var) {
+  os << var.name;
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const IntConst &i) {
+  os << i.value;
+  return os;
+}
+
 std::ostream &operator<<(std::ostream &os, const Expr &expr) {
   os << Printer::Print(expr);
   return os;

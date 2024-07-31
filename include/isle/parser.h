@@ -581,14 +581,25 @@ std::optional<Expr> ParseExpr(const Program &program, const SExpr &sexpr,
 }
 
 std::optional<Rule> ParseRule(const Program &program, const SList &stmt) {
-  if (stmt.size() != 3) {
+  if (stmt.size() < 3) {
     std::cerr << "error: expected pattern and expression in rule: " << stmt
               << std::endl;
     return {};
   }
 
-  auto pat = ParsePattern(program, stmt[1], true);
-  auto expr = ParseExpr(program, stmt[2], true);
+  int priority = 0;
+  int i = 0;
+  if (std::holds_alternative<SInt>(stmt[1])) {
+    if (stmt.size() != 4) {
+      std::cerr << "error: expected pattern and expression in rule: " << stmt
+                << std::endl;
+      return {};
+    }
+    priority = std::get<SInt>(stmt[1]);
+    i = 1;
+  }
+  auto pat = ParsePattern(program, stmt[i + 1], true);
+  auto expr = ParseExpr(program, stmt[i + 2], true);
 
   if (!pat) {
     std::cerr << "error: failed to parse pattern" << std::endl;
@@ -608,7 +619,7 @@ std::optional<Rule> ParseRule(const Program &program, const SList &stmt) {
     return {};
   }
 
-  return Rule(pat.value(), expr.value());
+  return Rule(pat.value(), expr.value(), priority);
 }
 
 /// parse a program from a list of s-expressions
@@ -671,7 +682,8 @@ std::optional<Program> ParseProgram(const std::vector<SExpr> &sexprs) {
         std::cerr << "error: failed to parse rule: " << sexpr << std::endl;
         return {};
       }
-      program.rules.emplace_back(std::move(rule.value()));
+      program.fn_rules[std::get<PCall>(rule.value().pattern).fn].push_back(
+          rule.value());
     } else {
       std::cerr << "error: unknown statement kind: " << sexpr << std::endl;
       return {};

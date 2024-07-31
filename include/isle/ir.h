@@ -65,6 +65,8 @@ struct Var {
   detail::CloneProxy<Var> Clone() const {
     return detail::CloneProxy<Var>(*this);
   }
+
+  operator const std::string &() const { return name; }
 };
 
 struct PBind {
@@ -84,6 +86,8 @@ struct IntConst {
   detail::CloneProxy<IntConst> Clone() const {
     return detail::CloneProxy<IntConst>(*this);
   }
+
+  operator int() const { return value; }
 };
 
 /// Rule
@@ -91,8 +95,13 @@ struct IntConst {
 struct Rule {
   Pattern pattern;
   Expr expr;
+  int priority;
 
-  Rule(Pattern pattern, Expr expr) : pattern(pattern), expr(expr) {}
+  Rule(Pattern pattern, Expr expr, int priority)
+      : pattern(pattern), expr(expr), priority(priority) {}
+
+  Rule(Pattern pattern, Expr expr)
+      : pattern(pattern), expr(expr), priority(0) {}
 };
 
 /// Isle Program
@@ -137,7 +146,7 @@ struct Program {
 
   std::vector<TypeDecl> type_decls; // indexed by Id
   std::vector<FnDecl> fn_decls;     // indexed by Id
-  std::vector<Rule> rules;
+  std::unordered_map<Id, std::vector<Rule>> fn_rules;
 
   void Print() const {
     std::cout << "declared types:\n";
@@ -171,8 +180,11 @@ struct Program {
       std::cout << ") " << fn.ret_type << "\n";
     }
     std::cout << "rules:\n";
-    for (const auto &rule : rules) {
-      std::cout << "\t" << rule.pattern << " -> " << rule.expr << "\n";
+    for (const auto &pr : fn_rules) {
+      for (const auto &rule : pr.second) {
+        std::cout << "\t[" << rule.priority << "] " << rule.pattern << " -> "
+                  << rule.expr << "\n";
+      }
     }
     std::cout << std::flush;
   }

@@ -1,24 +1,40 @@
+; Ideally, we want something like
+; (type E 
+;   (enum (Var (name str))
+;         (Lam (var str) (body E))
+;         (App (func E) (arg E)))).
+; But this is a recursive type so we would need to "box" the child Es.
 (type E primitive)
-(type int primitive)
+(type str primitive)
 
-(decl var (int) E)
-(decl lam (E E) E)
-(decl app (E E) E)
+(decl extern lam (str E) E)
+(constructor lam "MakeLam")
+(extractor lam "GetLam")
+
+(decl extern app (E E) E)
+(constructor app "MakeApp")
+(extractor app "GetApp")
+
+(decl extern subst (str E E) E)
+(constructor subst "Subst")
+
+(decl extern identity (E) E)
+(constructor identity "Identity")
 
 (decl eval (E) E)
 
-(decl extern mk-lam (int E) E)
-(extractor mk-lam "MakeLam")
+;; 2
+(rule 2 (eval (app (lam x e) (@ g (lam _ _))))
+  (eval (subst x g e)))
 
-(decl extern subst (int E E) E)
-(constructor subst "Subst")
+;; 1
+(rule 1 (eval (app (@ f (lam x e1)) e2))
+  (eval (app f (eval e2))))
 
-(rule (eval (lam (var i) e))
-  (mk-lam i (eval e)))
+;; 1
+(rule 1 (eval (app f x))
+  (eval (app (eval f) x)))
 
-(rule (eval (app (@ x (lam (var i) e1)) e2))
-  (subst i (eval e2) (eval e1)))
-
-; how is the initial term represented in memory? where does it come from?
-
-; (foo (@ x (bar _)) (baz x))
+;; 0
+(rule 0 (eval e)
+  (identity e))

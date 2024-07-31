@@ -9,11 +9,13 @@ int main(int argc, char **argv) {
 
   std::vector<SExpr> sexprs;
 
+  std::ifstream is(argv[1]);
+
   SExpr sexpr;
-  while (std::cin >> sexpr) {
+  while (is >> sexpr) {
     sexprs.push_back(sexpr);
   }
-  if (std::cin.bad()) {
+  if (is.bad()) {
     std::cerr << "failed to parse s-expression!" << std::endl;
     return 1;
   }
@@ -40,6 +42,10 @@ int main(int argc, char **argv) {
     EmitTypeDecl(prog.value(), td, std::cout);
   }
   std::cout << std::flush;
+
+  for (const auto &fn : prog.value().fn_decls) {
+    EmitConstructor(prog.value(), fn.id, std::cout);
+  }
 
   return 0;
 }
