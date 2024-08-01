@@ -16,5 +16,6 @@
 
 (rule (add x x) (mul x 2))
 (rule (mul x 2) (shl x 1))
+(rule (shl x 1) (let ((y (add x 0)) (z (mul y 1))) (mul z 2)))
 
 (rule (mul (and x (is_even) (is_foobar)) y) (mul (add x y) y))

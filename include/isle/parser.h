@@ -440,11 +440,11 @@ ParseExtern(const SList &stmt, const std::string &kind, Program *program) {
   return str;
 }
 
-std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
-                                    bool root) {
+std::optional<PatternRef> ParsePattern(const Program &program,
+                                       const SExpr &sexpr, bool root) {
   return std::visit(
       Visitor{
-          [&](const SList &list) -> std::optional<Pattern> {
+          [&](const SList &list) -> std::optional<PatternRef> {
             if (list.size() < 1) {
               std::cerr << "error: empty list in pattern: " << sexpr
                         << std::endl;
@@ -483,8 +483,7 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
               if (!subpattern) {
                 return {};
               }
-              return PBind(Var(*ident),
-                           std::make_shared<Pattern>(subpattern.value()));
+              return PBind(Var(*ident), *subpattern);
             } else if (*ident == "and") {
               if (list.size() < 2) {
                 std::cerr << "error: and needs at least one pattern!" << sexpr
@@ -502,8 +501,7 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
                 if (!subpattern) {
                   return {};
                 }
-                subpatterns.emplace_back(
-                    std::make_shared<Pattern>(subpattern.value()));
+                subpatterns.emplace_back(*subpattern);
               }
               return PAnd(subpatterns);
             }
@@ -515,18 +513,18 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
                         << "\" in pattern: " << sexpr << std::endl;
               return {};
             }
-            PCall result(it->second, {});
+            PatternRef res = PCall(it->second, {});
             // parse children
             for (int i = 1; i < list.size(); ++i) {
               auto c = ParsePattern(program, list[i], false);
               if (!c) {
                 return {};
               }
-              result.args.push_back(std::make_shared<Pattern>(c.value()));
+              std::get<PCall>(*res).args.push_back(*c);
             }
-            return result;
+            return res;
           },
-          [&](const SIdent &ident) -> std::optional<Pattern> {
+          [&](const SIdent &ident) -> std::optional<PatternRef> {
             if (root) {
               std::cerr << "error: expected call at pattern root, but got "
                         << sexpr << std::endl;
@@ -537,7 +535,7 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
             }
             return Var(ident);
           },
-          [&](const SInt &i) -> std::optional<Pattern> {
+          [&](const SInt &i) -> std::optional<PatternRef> {
             if (root) {
               std::cerr << "error: expected call at pattern root, but got "
                         << sexpr << std::endl;
@@ -548,83 +546,111 @@ std::optional<Pattern> ParsePattern(const Program &program, const SExpr &sexpr,
       sexpr);
 }
 
-std::optional<Expr> ParseExpr(const Program &program, const SExpr &sexpr,
-                              bool root) {
+std::optional<ExprRef> ParseExpr(const Program &program, const SExpr &sexpr,
+                                 bool root) {
   return std::visit(
-      Visitor{
-          [&](const SList &list) -> std::optional<Expr> {
-            if (list.size() < 1) {
-              std::cerr << "error: empty list in expr: " << sexpr << std::endl;
-              return {};
-            }
-            const SIdent *ident = std::get_if<SIdent>(&list[0]);
-            if (!ident) {
-              std::cerr
-                  << "error: expected function identifier in expr but got "
-                  << list[0] << ": " << sexpr << std::endl;
-              return {};
-            }
-            // (let var value body)
-            if (*ident == "let") {
-              if (list.size() != 4) {
-                std::cerr
-                    << "error: expected var, value, and body in let binding: "
-                    << sexpr << std::endl;
-                return {};
-              }
-              // NB: we conservatively disallow (let x (f ...) x) in the
-              // pattern root, but allow e.g. (let x (f ...) (g x x))
-              auto var = ParseExpr(program, list[1], false);
-              auto value = ParseExpr(program, list[2], false);
-              auto body = ParseExpr(program, list[3], root);
-              if (!var || !value || !body) {
-                return {};
-              }
-              if (!std::holds_alternative<Var>(var.value())) {
-                std::cerr << "error: expected var in let binding, but got "
-                          << var.value() << ": " << sexpr << std::endl;
-                return {};
-              }
-              // TODO: gah, having to do make_shared is annoying, also feels
-              // ineffecient
-              return ELet(std::get<Var>(var.value()),
-                          std::make_shared<Expr>(value.value()),
-                          std::make_shared<Expr>(body.value()));
-            }
-            // lookup function
-            auto it = program.fn_ids.find(*ident);
-            if (it == program.fn_ids.end()) {
-              std::cerr << "error: undeclared function \"" << *ident
-                        << "\" in expr: " << sexpr << std::endl;
-              return {};
-            }
-            ECall result(it->second, {});
-            // parse children
-            for (int i = 1; i < list.size(); ++i) {
-              auto c = ParseExpr(program, list[i], false);
-              if (!c) {
-                return {};
-              }
-              result.args.push_back(std::make_shared<Expr>(c.value()));
-            }
-            return result;
-          },
-          [&](const SIdent &ident) -> std::optional<Expr> {
-            if (root) {
-              std::cerr << "error: expected call at expr root, but got "
+      Visitor{[&](const SList &list) -> std::optional<ExprRef> {
+                if (list.size() < 1) {
+                  std::cerr << "error: empty list in expr: " << sexpr
+                            << std::endl;
+                  return {};
+                }
+                const SIdent *ident = std::get_if<SIdent>(&list[0]);
+                if (!ident) {
+                  std::cerr
+                      << "error: expected function identifier in expr but got "
+                      << list[0] << ": " << sexpr << std::endl;
+                  return {};
+                }
+                // (let ((var value)...) body)
+                if (*ident == "let") {
+                  if (list.size() != 3) {
+                    std::cerr
+                        << "error: expected bindings and body in let binding: "
                         << sexpr << std::endl;
-              return {};
-            }
-            return Var(ident);
-          },
-          [&](const SInt &i) -> std::optional<Expr> {
-            if (root) {
-              std::cerr << "error: expected call at expr root, but got "
-                        << sexpr << std::endl;
-              return {};
-            }
-            return IntConst(i);
-          }},
+                    return {};
+                  }
+                  // NB: we conservatively disallow (let ((x (f ...)) x) in the
+                  // pattern root, but allow e.g. (let ((x (f ...))) (g x x))
+                  const SList *blist = std::get_if<SList>(&list[1]);
+                  if (!blist) {
+                    std::cerr << "error: expected a list of bindings: " << sexpr
+                              << std::endl;
+                    return {};
+                  }
+                  std::vector<std::pair<Var, ExprRef>> bindings;
+                  for (const auto &b : *blist) {
+                    const SList *binding = std::get_if<SList>(&b);
+                    if (!binding || binding->size() != 2) {
+                      std::cerr << "error: expected a pair of var and expr for "
+                                   "binding, but got "
+                                << b << ": " << sexpr << std::endl;
+                      return {};
+                    }
+                    const auto var = ParseExpr(program, (*binding)[0], false);
+                    const auto val = ParseExpr(program, (*binding)[1], false);
+                    if (!var || !std::get_if<Var>(var->get())) {
+                      std::cerr << "error: expected var in binding, but got "
+                                << b << ": " << sexpr << std::endl;
+                      return {};
+                    }
+                    if (!val) {
+                      std::cerr
+                          << "error: failed to parse binding value: " << sexpr
+                          << std::endl;
+                      return {};
+                    }
+                    bindings.emplace_back(std::get<Var>(**var), *val);
+                  }
+                  auto body = ParseExpr(program, list[2], root);
+                  if (!body) {
+                    std::cerr << "error: failed to parse let body: " << sexpr
+                              << std::endl;
+                    return {};
+                  }
+                  // build return expr by going through the bindings backwards
+                  ExprRef result = *body;
+                  for (int i = 0; i < bindings.size(); ++i) {
+                    const int j = bindings.size() - i - 1;
+                    result =
+                        ELet(bindings[j].first, bindings[j].second, result);
+                  }
+                  return result;
+                }
+                // lookup function
+                auto it = program.fn_ids.find(*ident);
+                if (it == program.fn_ids.end()) {
+                  std::cerr << "error: undeclared function \"" << *ident
+                            << "\" in expr: " << sexpr << std::endl;
+                  return {};
+                }
+                ECall result(it->second, {});
+                // parse children
+                for (int i = 1; i < list.size(); ++i) {
+                  auto c = ParseExpr(program, list[i], false);
+                  if (!c) {
+                    return {};
+                  }
+                  result.args.push_back(*c);
+                }
+                return result;
+              },
+              [&](const SIdent &ident) -> std::optional<ExprRef> {
+                if (root) {
+                  std::cerr << "error: expected call at expr root, but got "
+                            << sexpr << std::endl;
+                  return {};
+                }
+                return Var(ident);
+              },
+              [&](const SInt &i) -> std::optional<ExprRef> {
+                if (root) {
+                  std::cerr << "error: expected call at expr root, but got "
+                            << sexpr << std::endl;
+                  return {};
+                }
+                return IntConst(i);
+              }},
       sexpr);
 }
 
@@ -660,14 +686,15 @@ std::optional<Rule> ParseRule(const Program &program, const SList &stmt) {
 
   // check rule wellformedness
   std::unordered_map<std::string, int> bindings;
-  CollectVars(pat.value(), &bindings);
-  if (HasFreeVars(expr.value(), bindings)) {
+  CollectVars(**pat, &bindings);
+  if (HasFreeVars(**expr, bindings)) {
     std::cerr << "error: expr contains unbound variables: " << stmt
               << std::endl;
     return {};
   }
 
-  return Rule(pat.value(), expr.value(), priority);
+  // TODO: should Rule just hold Refs?
+  return Rule(**pat, **expr, priority);
 }
 
 /// parse a program from a list of s-expressions

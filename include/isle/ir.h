@@ -54,6 +54,8 @@ struct ELet {
 
   ELet(Var var, ExprRef value, ExprRef body)
       : var(var), value(value), body(body) {}
+
+  operator ExprRef() const { return std::make_shared<Expr>(*this); }
 };
 
 struct PCall {
@@ -73,7 +75,9 @@ struct PAnd {
   operator PatternRef() const { return std::make_shared<Pattern>(*this); }
 };
 
-struct PWildcard {};
+struct PWildcard {
+  operator PatternRef() const { return std::make_shared<Pattern>(*this); }
+};
 
 struct PBind {
   Var var;
@@ -212,8 +216,14 @@ public:
   }
 
   void operator()(const ELet &elet) {
-    *this << "(let " << elet.var << " " << *elet.value << " " << *elet.body
-          << ")";
+    *this << "(let (";
+    *this << "(" << elet.var << " " << *elet.value << ")";
+    ExprRef e = elet.body;
+    while (const ELet *l = std::get_if<ELet>(e.get())) {
+      *this << " (" << l->var << " " << *l->value << ")";
+      e = l->body;
+    }
+    *this << ") " << *e << ")";
   }
 
   void operator()(const PCall &pcall) {
