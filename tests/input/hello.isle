@@ -5,8 +5,16 @@
 (type Bar (enum (X (x int)) (Y (y Foo))))
 (type BinOp extern (enum Add Mul))
 
-(decl + (int int) int)
-(decl * (int int) int)
-(decl extern iprint (int) void)
+(decl add (int int) int)
+(decl mul (int int) int)
+(decl shl (int int) int)
 
-(rule (+ x x) (* x 2))
+(decl extern is_even () int)
+(decl extern is_foobar () int)
+(extractor is_even "IsEven")
+(extractor is_foobar "IsFoobar")
+
+(rule (add x x) (mul x 2))
+(rule (mul x 2) (shl x 1))
+
+(rule (mul (and x (is_even) (is_foobar)) y) (mul (add x y) y))

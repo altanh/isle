@@ -22,28 +22,50 @@
 (decl extern identity (E) E)
 (constructor identity "Identity")
 
-;; subst
 (decl subst (str E E) E)
 
-(rule 1 (subst x e1 (var x)) (identity e1))
+(rule 3 (subst x e1 (var x)) (identity e1))
 
-(rule (subst x e1 (@ y (var yy))) (identity y))
+(rule 2 (subst x e1 (@ y (var yy))) (identity y))
+
+;; shadowing
+(rule 1 (subst x e1 (@ f (lam x e2))) (identity f))
 
 (rule (subst x e1 (lam y e2)) (lam y (subst x e1 e2)))
 
 (rule (subst x e1 (app f y)) (app (subst x e1 f) (subst x e1 y)))
 
 ;; eval
-(decl eval (E) E)
 
-(rule 2 (eval (app (lam x e) (@ g (lam _ _))))
-  (eval (subst x g e)))
+;; call-by-value
+(decl eval_cbv (E) E)
 
-(rule 1 (eval (app (@ f (lam x e1)) e2))
-  (eval (app f (eval e2))))
+(rule 2 (eval_cbv (app (lam x e) (@ g (lam _ _))))
+  (eval_cbv (subst x g e)))
 
-(rule 1 (eval (app f x))
-  (eval (app (eval f) x)))
+(rule 1 (eval_cbv (app (@ f (lam x e1)) e2))
+  (eval_cbv (app f (eval_cbv e2))))
 
-(rule 0 (eval e)
+(rule 1 (eval_cbv (app f x))
+  (eval_cbv (app (eval_cbv f) x)))
+
+(rule (eval_cbv e)
   (identity e))
+
+;; TODO broken
+
+;; normal order
+(decl eval_normal (E) E)
+
+;; (\x.e1) e2 => e1[e2/x]
+
+(rule 2 (eval_normal (app (lam x e) y)) (eval_normal (subst x y e)))
+
+;; (rule 1 (eval_normal (app f x)) (eval_normal (app (eval_normal f) x)))
+
+(rule (eval_normal (lam x e)) (lam x (eval_normal e)))
+
+(rule (eval_normal e) (identity e))
+
+(decl eval (E) E)
+(rule (eval e) (eval_cbv e))

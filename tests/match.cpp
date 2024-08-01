@@ -11,12 +11,12 @@ int main(int argc, char **argv) {
   IntConst zero(0);
   IntConst one(1);
 
-  PatternRef px = x.Clone();
-  PatternRef pzero = zero.Clone();
-  PatternRef pone = one.Clone();
-  ExprRef ex = x.Clone();
-  ExprRef ezero = zero.Clone();
-  ExprRef eone = one.Clone();
+  PatternRef px = x;
+  PatternRef pzero = zero;
+  PatternRef pone = one;
+  ExprRef ex = x;
+  ExprRef ezero = zero;
+  ExprRef eone = one;
 
   Pattern pat = PCall(0, {px, pone});
   Pattern pat2 = PCall(0, {pone, pone});
@@ -41,11 +41,12 @@ int main(int argc, char **argv) {
 
   int ret = 0;
 
+  Printer pp(std::cout);
+
   for (const Test &test : tests) {
-    std::cout << "Match(" << Printer::Print(std::get<0>(test)) << ", "
-              << Printer::Print(std::get<1>(test)) << ")\n";
+    pp << "Match(" << std::get<0>(test) << ", " << std::get<1>(test) << ")\n";
     std::cout << "\tExpected: " << std::get<2>(test) << "\n";
-    bool actual = Matcher::Match(std::get<0>(test), std::get<1>(test));
+    bool actual = Match(std::get<0>(test), std::get<1>(test));
     bool pass = actual == std::get<2>(test);
     std::cout << "\tActual: " << actual << "\n";
     std::cout << "\tRESULT: " << (pass ? "PASS" : "FAIL !!!!!!!!") << "\n";

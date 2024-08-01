@@ -121,6 +121,11 @@ void EmitMatch(const Program &program, const Pattern &pat,
                   EmitMatch(program, *call.args[i], field, os, bindings, nf);
                 }
               },
+              [&](const PAnd &pand) {
+                for (const auto &pat : pand.patterns) {
+                  EmitMatch(program, *pat, value, os, bindings, nf);
+                }
+              },
               [&](const PBind &bind) {
                 // match subterm, then bind var to value
                 EmitMatch(program, *bind.pattern, value, os, bindings, nf);
@@ -173,6 +178,11 @@ std::string EmitExpr(const Program &program, const Expr &expr, std::ostream &os,
                 }
                 oss << "))";
                 return oss.str();
+              },
+              [&](const ELet &let) {
+                const std::string val = EmitExpr(program, *let.value, os, nf);
+                os << "    auto " << let.var << " = " << val << ";\n";
+                return EmitExpr(program, *let.body, os, nf);
               },
               [&](const Var &var) { return var.name; },
               [&](const IntConst &i) { return std::to_string(i); }},
@@ -234,7 +244,9 @@ void EmitConstructor(const Program &program, Id fn_id, std::ostream &os) {
     }
   }
   os << ") {\n";
+  Printer pp(os, &program);
   for (int i = 0; i < rules.size(); ++i) {
+    pp << "  // " << rules[i].pattern << " => " << rules[i].expr << "\n";
     os << "  auto rule" << i << " = ";
     EmitRuleLambda(program, rules[i], os);
   }

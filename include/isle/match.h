@@ -8,68 +8,67 @@
 
 namespace isle {
 
-struct Matcher {
-  bool operator()(const PCall &p_call) {
-    // check that expr is a ECall
-    if (!std::holds_alternative<ECall>(expr)) {
+class Matcher {
+  std::unordered_map<std::string, Expr> &bindings_;
+
+public:
+  bool operator()(const PCall &pcall, const ECall &ecall) {
+    if (pcall.fn != ecall.fn) {
       return false;
     }
-    const ECall &e_call = std::get<ECall>(expr);
-    // check fn equality
-    if (p_call.fn != e_call.fn) {
+    if (pcall.args.size() != ecall.args.size()) {
       return false;
     }
-    // TODO(@altanh): should we support variable number of args?
-    if (p_call.args.size() != e_call.args.size()) {
-      return false;
-    }
-    // match args
-    for (size_t i = 0; i < p_call.args.size(); ++i) {
-      if (!std::visit(Matcher{*e_call.args[i], bindings}, *p_call.args[i])) {
+    for (int i = 0; i < pcall.args.size(); ++i) {
+      if (!std::visit(*this, *pcall.args[i], *ecall.args[i])) {
         return false;
       }
     }
     return true;
   }
 
-  bool operator()(const PBind &p_bind) {
-    // try to match subpattern, then bind to variable
-    if (!std::visit(Matcher{expr, bindings}, *p_bind.pattern)) {
+  bool operator()(const PAnd &pand, const Expr &expr) {
+    for (const auto &pat : pand.patterns) {
+      if (!std::visit(*this, *pat, expr)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool operator()(const PBind &pbind, const Expr &expr) {
+    if (!std::visit(*this, *pbind.pattern, expr)) {
       return false;
     }
-    bindings->emplace(p_bind.var.name, expr);
+    bindings_.emplace(pbind.var.name, expr);
     return true;
   }
 
-  bool operator()(const PWildcard &p_wildcard) { return true; }
+  bool operator()(const PWildcard &wc, const Expr &expr) { return true; }
 
-  bool operator()(const Var &var) {
-    // if var is bound, check that it is bound to the same expr
-    if (bindings->count(var.name)) {
-      return ExprEq::Check(bindings->at(var.name), expr);
+  bool operator()(const Var &var, const Expr &expr) {
+    if (bindings_.count(var.name)) {
+      return Equals(bindings_.at(var.name), expr);
     }
-
-    // bind var to expr
-    bindings->emplace(var.name, expr);
+    bindings_.emplace(var.name, expr);
     return true;
   }
 
-  bool operator()(const IntConst &int_const) {
-    return std::holds_alternative<IntConst>(expr) &&
-           std::get<IntConst>(expr).value == int_const.value;
+  bool operator()(const IntConst &i, const IntConst &j) {
+    return i.value == j.value;
   }
 
-  Matcher(const Expr &expr, std::unordered_map<std::string, Expr> *bindings)
-      : expr(expr), bindings(bindings) {}
-
-  static bool Match(const Pattern &pattern, const Expr &expr) {
-    std::unordered_map<std::string, Expr> bindings;
-    return std::visit(Matcher{expr, &bindings}, pattern);
+  template <typename P, typename E> bool operator()(const P &p, const E &e) {
+    return false;
   }
 
-private:
-  const Expr &expr;
-  std::unordered_map<std::string, Expr> *bindings;
+  Matcher(std::unordered_map<std::string, Expr> &bindings)
+      : bindings_(bindings) {}
 };
+
+bool Match(const Pattern &pattern, const Expr &expr) {
+  std::unordered_map<std::string, Expr> bindings;
+  return std::visit(Matcher(bindings), pattern, expr);
+}
 
 } // namespace isle

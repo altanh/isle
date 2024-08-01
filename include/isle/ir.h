@@ -16,58 +16,64 @@ struct Var;
 struct IntConst;
 struct PCall;
 struct PBind;
+struct PAnd;
 struct PWildcard;
 struct ECall;
+struct ELet;
 
-using Pattern = std::variant<PCall, PBind, PWildcard, Var, IntConst>;
-using Expr = std::variant<ECall, Var, IntConst>;
+using Pattern = std::variant<PCall, PAnd, PBind, PWildcard, Var, IntConst>;
+using Expr = std::variant<ECall, ELet, Var, IntConst>;
 using PatternRef = std::shared_ptr<Pattern>;
 using ExprRef = std::shared_ptr<Expr>;
-
-struct ECall {
-  Id fn;
-  std::vector<ExprRef> args;
-
-  ECall(Id fn, std::vector<ExprRef> args) : fn(fn), args(args) {}
-
-  ExprRef Clone() const { return std::make_shared<Expr>(*this); }
-};
-
-struct PCall {
-  Id fn;
-  std::vector<PatternRef> args;
-
-  PCall(Id fn, std::vector<PatternRef> args) : fn(fn), args(args) {}
-
-  PatternRef Clone() const { return std::make_shared<Pattern>(*this); }
-};
-
-struct PWildcard {};
-
-namespace detail {
-
-template <class T> struct CloneProxy {
-  const T &v;
-  CloneProxy(const T &v) : v(v) {}
-
-  operator PatternRef() const { return std::make_shared<Pattern>(v); }
-
-  operator ExprRef() const { return std::make_shared<Expr>(v); }
-};
-
-} // namespace detail
 
 struct Var {
   std::string name;
 
   Var(std::string name) : name(name) {}
 
-  detail::CloneProxy<Var> Clone() const {
-    return detail::CloneProxy<Var>(*this);
-  }
+  operator PatternRef() const { return std::make_shared<Pattern>(*this); }
+
+  operator ExprRef() const { return std::make_shared<Expr>(*this); }
 
   operator const std::string &() const { return name; }
 };
+
+struct ECall {
+  Id fn;
+  std::vector<ExprRef> args;
+
+  ECall(Id fn, const std::vector<ExprRef> &args) : fn(fn), args(args) {}
+
+  operator ExprRef() const { return std::make_shared<Expr>(*this); }
+};
+
+struct ELet {
+  Var var;
+  ExprRef value;
+  ExprRef body;
+
+  ELet(Var var, ExprRef value, ExprRef body)
+      : var(var), value(value), body(body) {}
+};
+
+struct PCall {
+  Id fn;
+  std::vector<PatternRef> args;
+
+  PCall(Id fn, const std::vector<PatternRef> &args) : fn(fn), args(args) {}
+
+  operator PatternRef() const { return std::make_shared<Pattern>(*this); }
+};
+
+struct PAnd {
+  std::vector<PatternRef> patterns;
+
+  PAnd(const std::vector<PatternRef> &patterns) : patterns(patterns) {}
+
+  operator PatternRef() const { return std::make_shared<Pattern>(*this); }
+};
+
+struct PWildcard {};
 
 struct PBind {
   Var var;
@@ -75,7 +81,7 @@ struct PBind {
 
   PBind(Var var, PatternRef pattern) : var(var), pattern(pattern) {}
 
-  PatternRef Clone() const { return std::make_shared<Pattern>(*this); }
+  operator PatternRef() const { return std::make_shared<Pattern>(*this); }
 };
 
 struct IntConst {
@@ -83,10 +89,8 @@ struct IntConst {
 
   IntConst(int value) : value(value) {}
 
-  detail::CloneProxy<IntConst> Clone() const {
-    return detail::CloneProxy<IntConst>(*this);
-  }
-
+  operator ExprRef() const { return std::make_shared<Expr>(*this); }
+  operator PatternRef() const { return std::make_shared<Pattern>(*this); }
   operator int() const { return value; }
 };
 
@@ -148,46 +152,7 @@ struct Program {
   std::vector<FnDecl> fn_decls;     // indexed by Id
   std::unordered_map<Id, std::vector<Rule>> fn_rules;
 
-  void Print() const {
-    std::cout << "declared types:\n";
-    for (int i = 0; i < type_decls.size(); ++i) {
-      const auto &ty = type_decls[i];
-      std::cout << "\t" << i << ": " << ty.id << " " << ty.name << " "
-                << ty.kind << "\n";
-      // TODO print enum
-      if (ty.kind != TypeDecl::Kind::Primitive) {
-        for (const auto &opt : ty.options.value()) {
-          std::cout << "\t\t" << opt.name << "\n";
-          for (const auto &field : opt.fields) {
-            std::cout << "\t\t\t" << field.first << ": " << field.second
-                      << std::endl;
-          }
-        }
-      }
-    }
-    std::cout << "declared funcs:\n";
-    for (int i = 0; i < fn_decls.size(); ++i) {
-      const auto &fn = fn_decls[i];
-      std::cout << "\t" << i << ": " << fn.id << " " << fn.name << " "
-                << fn.external << " " << fn.ctor.value_or("n/a") << " "
-                << fn.xtor.value_or("n/a") << " (";
-      if (!fn.arg_types.empty()) {
-        std::cout << fn.arg_types[0];
-        for (int j = 1; j < fn.arg_types.size(); ++j) {
-          std::cout << " " << fn.arg_types[j];
-        }
-      }
-      std::cout << ") " << fn.ret_type << "\n";
-    }
-    std::cout << "rules:\n";
-    for (const auto &pr : fn_rules) {
-      for (const auto &rule : pr.second) {
-        std::cout << "\t[" << rule.priority << "] " << rule.pattern << " -> "
-                  << rule.expr << "\n";
-      }
-    }
-    std::cout << std::flush;
-  }
+  void Print() const;
 };
 
 // TODO(@altanh): typechecking
@@ -199,5 +164,152 @@ template <class... Ts> struct Visitor : Ts... {
 };
 
 template <class... Ts> Visitor(Ts...) -> Visitor<Ts...>;
+
+class Printer {
+  const Program *prog_;
+  std::ostream &os_;
+
+public:
+  Printer(std::ostream &os, const Program *prog = nullptr)
+      : os_(os), prog_(prog) {}
+
+  Printer &operator<<(const Var &var) {
+    os_ << var.name;
+    return *this;
+  }
+
+  Printer &operator<<(const IntConst &i) {
+    os_ << i.value;
+    return *this;
+  }
+
+  Printer &operator<<(const Expr &e) {
+    std::visit(*this, e);
+    return *this;
+  }
+
+  Printer &operator<<(const Pattern &p) {
+    std::visit(*this, p);
+    return *this;
+  }
+
+  template <typename T> Printer &operator<<(const T &t) {
+    os_ << t;
+    return *this;
+  }
+
+  void operator()(const ECall &ecall) {
+    *this << "(";
+    if (prog_) {
+      *this << prog_->fn_names.at(ecall.fn);
+    } else {
+      *this << "%" << ecall.fn;
+    }
+    for (const auto &arg : ecall.args) {
+      *this << " " << *arg;
+    }
+    *this << ")";
+  }
+
+  void operator()(const ELet &elet) {
+    *this << "(let " << elet.var << " " << *elet.value << " " << *elet.body
+          << ")";
+  }
+
+  void operator()(const PCall &pcall) {
+    *this << "(";
+    if (prog_) {
+      *this << prog_->fn_names.at(pcall.fn);
+    } else {
+      *this << "%" << pcall.fn;
+    }
+    for (const auto &arg : pcall.args) {
+      *this << " " << *arg;
+    }
+    *this << ")";
+  }
+
+  void operator()(const PAnd &pand) {
+    *this << "(and";
+    for (const auto &pat : pand.patterns) {
+      *this << " " << *pat;
+    }
+    *this << ")";
+  }
+
+  void operator()(const PBind &pbind) {
+    *this << "(@ " << pbind.var << " " << *pbind.pattern << ")";
+  }
+
+  void operator()(const PWildcard &pwildcard) { *this << "_"; }
+
+  void operator()(const Var &var) { *this << var.name; }
+
+  void operator()(const IntConst &i) { *this << i.value; }
+};
+
+std::ostream &operator<<(std::ostream &os, const Var &var) {
+  os << var.name;
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const IntConst &i) {
+  os << i.value;
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const Expr &expr) {
+  Printer(os) << expr;
+  return os;
+}
+
+std::ostream &operator<<(std::ostream &os, const Pattern &pattern) {
+  Printer(os) << pattern;
+  return os;
+}
+
+void Program::Print() const {
+  std::cout << "declared types:\n";
+  for (int i = 0; i < type_decls.size(); ++i) {
+    const auto &ty = type_decls[i];
+    std::cout << "\t" << i << ": " << ty.id << " " << ty.name << " " << ty.kind
+              << "\n";
+    // TODO print enum
+    if (ty.kind != TypeDecl::Kind::Primitive) {
+      for (const auto &opt : ty.options.value()) {
+        std::cout << "\t\t" << opt.name << "\n";
+        for (const auto &field : opt.fields) {
+          std::cout << "\t\t\t" << field.first << ": " << field.second
+                    << std::endl;
+        }
+      }
+    }
+  }
+  std::cout << "declared funcs:\n";
+  for (int i = 0; i < fn_decls.size(); ++i) {
+    const auto &fn = fn_decls[i];
+    std::cout << "\t" << i << ": " << fn.id << " " << fn.name << " "
+              << fn.external << " " << fn.ctor.value_or("n/a") << " "
+              << fn.xtor.value_or("n/a") << " (";
+    if (!fn.arg_types.empty()) {
+      std::cout << fn.arg_types[0];
+      for (int j = 1; j < fn.arg_types.size(); ++j) {
+        std::cout << " " << fn.arg_types[j];
+      }
+    }
+    std::cout << ") " << fn.ret_type << "\n";
+  }
+  std::cout << "rules:\n";
+
+  Printer pp(std::cout, this);
+
+  for (const auto &pr : fn_rules) {
+    for (const auto &rule : pr.second) {
+      pp << "\t[" << rule.priority << "] " << rule.pattern << " -> "
+         << rule.expr << "\n";
+    }
+  }
+  std::cout << std::flush;
+}
 
 } // namespace isle
