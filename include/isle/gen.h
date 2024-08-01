@@ -151,7 +151,7 @@ void EmitMatch(const Program &program, const Pattern &pat,
 }
 
 std::string EmitExpr(const Program &program, const Expr &expr, std::ostream &os,
-                     NameFactory &nf) {
+                     NameFactory &nf, bool force) {
   return std::visit(
       Visitor{[&](const ECall &call) {
                 const auto &fn = program.fn_decls[call.fn];
@@ -160,7 +160,8 @@ std::string EmitExpr(const Program &program, const Expr &expr, std::ostream &os,
                     fn.ctor.value_or("construct_" + fn.name);
                 std::vector<std::string> args;
                 for (int i = 0; i < call.args.size(); ++i) {
-                  args.emplace_back(EmitExpr(program, *call.args[i], os, nf));
+                  args.emplace_back(
+                      EmitExpr(program, *call.args[i], os, nf, force));
                 }
                 const std::string name = nf.Get(fn.name);
                 for (int i = 0; i < call.args.size(); ++i) {
@@ -169,20 +170,27 @@ std::string EmitExpr(const Program &program, const Expr &expr, std::ostream &os,
                 }
                 std::ostringstream oss;
                 // force : T -> T, force : Maybe T -> T
-                oss << "force(" << ctor << "(";
+                if (force) {
+                  oss << "force(";
+                }
+                oss << ctor << "(";
                 if (!call.args.empty()) {
                   oss << name << "_arg0";
                   for (int i = 1; i < call.args.size(); ++i) {
                     oss << ", " << name << "_arg" << i;
                   }
                 }
-                oss << "))";
+                oss << ")";
+                if (force) {
+                  oss << ")";
+                }
                 return oss.str();
               },
               [&](const ELet &let) {
-                const std::string val = EmitExpr(program, *let.value, os, nf);
+                const std::string val =
+                    EmitExpr(program, *let.value, os, nf, force);
                 os << "    auto " << let.var << " = " << val << ";\n";
-                return EmitExpr(program, *let.body, os, nf);
+                return EmitExpr(program, *let.body, os, nf, force);
               },
               [&](const Var &var) { return var.name; },
               [&](const IntConst &i) { return std::to_string(i); }},
@@ -196,7 +204,8 @@ void EmitRuleLambda(const Program &program, const Rule &rule,
   //   ...
   //   // construct expr
   // };
-  const PCall &call = std::get<PCall>(rule.pattern);
+  Printer pp(os, &program);
+  const PCall &call = std::get<PCall>(*rule.pattern);
   const auto &fn = program.fn_decls[call.fn];
   const int nargs = fn.arg_types.size();
   std::unordered_map<std::string, std::string> bindings;
@@ -211,12 +220,27 @@ void EmitRuleLambda(const Program &program, const Rule &rule,
   }
   os << ") -> std::optional<" << program.type_names.at(fn.ret_type) << "> {\n";
   for (int i = 0; i < nargs; ++i) {
-    os << "     // match argument " << i << "\n";
+    os << "    // match argument " << i << "\n";
     EmitMatch(program, *call.args[i], "arg" + std::to_string(i), os, bindings,
               nf);
   }
+  // if-let checks
+  if (!rule.if_lets.empty()) {
+    for (const auto &il : rule.if_lets) {
+      pp << "    // (if-let " << *il.pattern << " " << *il.expr << ")\n";
+      // evaluate expr FIRST
+      const std::string opt = EmitExpr(program, *il.expr, os, nf, false);
+      const std::string opt_val = nf.Get("maybe");
+      const std::string val = nf.Get("value");
+      pp << "    auto " << opt_val << " = " << opt << ";\n";
+      pp << "    if (!" << opt_val << ") { return {}; }\n";
+      pp << "    auto " << val << " = *" << opt_val << ";\n";
+      // then match on result
+      EmitMatch(program, *il.pattern, val, os, bindings, nf);
+    }
+  }
   os << "    // construct result expr\n";
-  const std::string expr = EmitExpr(program, rule.expr, os, nf);
+  const std::string expr = EmitExpr(program, *rule.expr, os, nf, true);
   os << "    return " << expr << ";\n";
   os << "  };\n";
 }
@@ -246,7 +270,7 @@ void EmitConstructor(const Program &program, Id fn_id, std::ostream &os) {
   os << ") {\n";
   Printer pp(os, &program);
   for (int i = 0; i < rules.size(); ++i) {
-    pp << "  // " << rules[i].pattern << " => " << rules[i].expr << "\n";
+    pp << "  // " << *rules[i].pattern << " => " << *rules[i].expr << "\n";
     os << "  auto rule" << i << " = ";
     EmitRuleLambda(program, rules[i], os);
   }

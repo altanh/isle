@@ -100,16 +100,26 @@ struct IntConst {
 
 /// Rule
 
+struct IfLet {
+  PatternRef pattern;
+  ExprRef expr;
+};
+
 struct Rule {
-  Pattern pattern;
-  Expr expr;
+  PatternRef pattern;
+  std::vector<IfLet> if_lets;
+  ExprRef expr;
   int priority;
 
-  Rule(Pattern pattern, Expr expr, int priority)
-      : pattern(pattern), expr(expr), priority(priority) {}
+  Rule(PatternRef pattern, ExprRef expr, const std::vector<IfLet> &if_lets,
+       int priority)
+      : pattern(pattern), expr(expr), if_lets(if_lets), priority(priority) {}
 
-  Rule(Pattern pattern, Expr expr)
-      : pattern(pattern), expr(expr), priority(0) {}
+  Rule(PatternRef pattern, ExprRef expr, const std::vector<IfLet> &if_lets)
+      : pattern(pattern), expr(expr), if_lets(if_lets), priority(0) {}
+
+  Rule(PatternRef pattern, ExprRef expr)
+      : pattern(pattern), expr(expr), if_lets(), priority(0) {}
 };
 
 /// Isle Program
@@ -315,8 +325,16 @@ void Program::Print() const {
 
   for (const auto &pr : fn_rules) {
     for (const auto &rule : pr.second) {
-      pp << "\t[" << rule.priority << "] " << rule.pattern << " -> "
-         << rule.expr << "\n";
+      pp << "\t[" << rule.priority << "] " << *rule.pattern << " => "
+         << *rule.expr;
+      if (!rule.if_lets.empty()) {
+        pp << " where\n";
+        for (auto il : rule.if_lets) {
+          pp << "\t\t(if-let " << *il.pattern << " " << *il.expr << ")\n";
+        }
+      } else {
+        pp << "\n";
+      }
     }
   }
   std::cout << std::flush;

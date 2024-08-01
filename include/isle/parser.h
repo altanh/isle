@@ -662,18 +662,49 @@ std::optional<Rule> ParseRule(const Program &program, const SList &stmt) {
   }
 
   int priority = 0;
-  int i = 0;
-  if (std::holds_alternative<SInt>(stmt[1])) {
-    if (stmt.size() != 4) {
+  int i = 1;
+  if (std::holds_alternative<SInt>(stmt[i])) {
+    if (stmt.size() < 4) {
       std::cerr << "error: expected pattern and expression in rule: " << stmt
                 << std::endl;
       return {};
     }
-    priority = std::get<SInt>(stmt[1]);
-    i = 1;
+    priority = std::get<SInt>(stmt[i]);
+    ++i;
   }
-  auto pat = ParsePattern(program, stmt[i + 1], true);
-  auto expr = ParseExpr(program, stmt[i + 2], true);
+  // parse pattern
+  auto pat = ParsePattern(program, stmt[i++], true);
+  // parse if-lets
+  std::vector<IfLet> if_lets;
+  for (; i < stmt.size() - 1; ++i) {
+    const SList *il = std::get_if<SList>(&stmt[i]);
+    if (!il) {
+      std::cerr << "error: expected s-expression for if-let, but got "
+                << stmt[i] << ": " << stmt << std::endl;
+      return {};
+    }
+    const SIdent *ident = std::get_if<SIdent>(&(*il)[0]);
+    if (!ident || *ident != "if-let") {
+      std::cerr << "error: expected if-let: " << stmt << std::endl;
+      return {};
+    }
+    if (il->size() != 3) {
+      std::cerr << "error: expected pattern and expression in if-let: " << stmt
+                << std::endl;
+      return {};
+    }
+    auto if_let_pat = ParsePattern(program, (*il)[1], false);
+    auto if_let_expr = ParseExpr(program, (*il)[2], false);
+    if (!if_let_pat) {
+      return {};
+    }
+    if (!if_let_expr) {
+      return {};
+    }
+    if_lets.emplace_back(IfLet{*if_let_pat, *if_let_expr});
+  }
+  // parse expr
+  auto expr = ParseExpr(program, stmt[i], true);
 
   if (!pat) {
     std::cerr << "error: failed to parse pattern" << std::endl;
@@ -694,7 +725,7 @@ std::optional<Rule> ParseRule(const Program &program, const SList &stmt) {
   }
 
   // TODO: should Rule just hold Refs?
-  return Rule(**pat, **expr, priority);
+  return Rule(*pat, *expr, if_lets, priority);
 }
 
 /// parse a program from a list of s-expressions
@@ -757,7 +788,7 @@ std::optional<Program> ParseProgram(const std::vector<SExpr> &sexprs) {
         std::cerr << "error: failed to parse rule: " << sexpr << std::endl;
         return {};
       }
-      program.fn_rules[std::get<PCall>(rule.value().pattern).fn].push_back(
+      program.fn_rules[std::get<PCall>(*rule->pattern).fn].push_back(
           rule.value());
     } else {
       std::cerr << "error: unknown statement kind: " << sexpr << std::endl;
