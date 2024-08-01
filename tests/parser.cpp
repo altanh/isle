@@ -10,6 +10,7 @@ int main(int argc, char **argv) {
   std::vector<SExpr> sexprs;
 
   std::ifstream is(argv[1]);
+  std::ofstream os(argv[2]);
 
   SExpr sexpr;
   while (is >> sexpr) {
@@ -37,15 +38,15 @@ int main(int argc, char **argv) {
   }
   prog.value().Print();
 
-  std::cout << "generated code:\n";
   for (const auto &td : prog.value().type_decls) {
-    EmitTypeDecl(prog.value(), td, std::cout);
+    EmitTypeDecl(prog.value(), td, os);
   }
-  std::cout << std::flush;
 
   for (const auto &fn : prog.value().fn_decls) {
-    EmitConstructor(prog.value(), fn.id, std::cout);
+    EmitConstructor(prog.value(), fn.id, os);
   }
+
+  os << std::flush;
 
   return 0;
 }

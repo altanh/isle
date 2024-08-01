@@ -7,6 +7,7 @@
 (type E primitive)
 (type str primitive)
 
+;;;;;;; lambda expr
 (decl extern var (str) E)
 (constructor var "MakeVar")
 (extractor var "GetVar")
@@ -18,26 +19,29 @@
 (decl extern app (E E) E)
 (constructor app "MakeApp")
 (extractor app "GetApp")
+;;;;;;;
 
 (decl extern identity (E) E)
 (constructor identity "Identity")
 
-;; subst
-(decl subst (str E E) E)
+;; (decl extern-scoped bind (str E E) effect)
+(decl extern bind (str E E) E)
+(constructor bind "Bind")
 
-(rule 1 (subst x e1 (var x)) (identity e1))
+(decl extern unbind (str E) E)
+(constructor unbind "Unbind")
 
-(rule (subst x e1 (@ y (var yy))) (identity y))
-
-(rule (subst x e1 (lam y e2)) (lam y (subst x e1 e2)))
-
-(rule (subst x e1 (app f y)) (app (subst x e1 f) (subst x e1 y)))
+(decl extern lookup (str) E)
+(constructor lookup "Lookup")
 
 ;; eval
 (decl eval (E) E)
 
+(rule 3 (eval (var x)) (lookup x))
+
 (rule 2 (eval (app (lam x e) (@ g (lam _ _))))
-  (eval (subst x g e)))
+  (unbind x (eval (bind x g e))))
+  ;; (scoped (bind x g) (eval e))
 
 (rule 1 (eval (app (@ f (lam x e1)) e2))
   (eval (app f (eval e2))))

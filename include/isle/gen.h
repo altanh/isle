@@ -163,14 +163,15 @@ std::string EmitExpr(const Program &program, const Expr &expr, std::ostream &os,
                      << ";\n";
                 }
                 std::ostringstream oss;
-                oss << ctor << "(";
+                // force : T -> T, force : Maybe T -> T
+                oss << "force(" << ctor << "(";
                 if (!call.args.empty()) {
                   oss << name << "_arg0";
                   for (int i = 1; i < call.args.size(); ++i) {
                     oss << ", " << name << "_arg" << i;
                   }
                 }
-                oss << ")";
+                oss << "))";
                 return oss.str();
               },
               [&](const Var &var) { return var.name; },
@@ -198,7 +199,7 @@ void EmitRuleLambda(const Program &program, const Rule &rule,
          << i;
     }
   }
-  os << ") {\n";
+  os << ") -> std::optional<" << program.type_names.at(fn.ret_type) << "> {\n";
   for (int i = 0; i < nargs; ++i) {
     os << "     // match argument " << i << "\n";
     EmitMatch(program, *call.args[i], "arg" + std::to_string(i), os, bindings,
@@ -206,7 +207,7 @@ void EmitRuleLambda(const Program &program, const Rule &rule,
   }
   os << "    // construct result expr\n";
   const std::string expr = EmitExpr(program, rule.expr, os, nf);
-  os << "    return " << expr << "\n";
+  os << "    return " << expr << ";\n";
   os << "  };\n";
 }
 
@@ -252,7 +253,7 @@ void EmitConstructor(const Program &program, Id fn_id, std::ostream &os) {
       }
     }
     os << ");\n";
-    os << "  if (result) { return result.value() }\n";
+    os << "  if (result) { return result.value(); }\n";
   }
   os << "  return {};\n";
   os << "}\n";
