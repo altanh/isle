@@ -114,7 +114,7 @@ void EmitMatch(const Program &program, const Pattern &pat,
                 os << "    if (!" << args_name << ") { return {}; }\n";
                 for (int i = 0; i < fn.arg_types.size(); ++i) {
                   oss.str("");
-                  oss << "std::get<" << i << ">(" << args_name << ".value())";
+                  oss << "std::get<" << i << ">(*" << args_name << ")";
                   const std::string field =
                       args_name + "_arg" + std::to_string(i);
                   os << "    auto " << field << " = " << oss.str() << ";\n";

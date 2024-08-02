@@ -6,6 +6,7 @@
 ; But this is a recursive type so we would need to "box" the child Es.
 (type E primitive)
 (type str primitive)
+(type unit primitive)
 
 (decl extern var (str) E)
 (constructor var "MakeVar")
@@ -22,17 +23,74 @@
 (decl extern identity (E) E)
 (constructor identity "Identity")
 
+(decl extern unit () unit)
+(constructor unit "std::make_tuple")
+
+(decl extern strneq (str str) unit)
+(constructor strneq "StrNeq")
+
+;; (decl free (str E) unit)
+;; (rule (free x (var x)) (unit))
+;; (rule (free x (lam y e))
+;;   (if-let _ (strneq x y))
+;;   (if-let _ (free x e))
+;;   (unit))
+;; ;; this doesn't work: it should be free in f OR y, not AND... I think
+;; (rule (free x (app f y))
+;;   (if-let _ (free x f))
+;;   (if-let _ (free x y))
+;;   (unit))
+
+(decl bound (str E) unit)
+(rule (bound x (lam x e)) (unit))
+;; TODO: remove need for reifying !=, instead order patterns by variable binding?
+(rule (bound x (lam y e))
+  (if-let _ (strneq x y))
+  (bound x e))
+(rule (bound x (app f y))
+  (if-let _ (bound x f))
+  (if-let _ (bound x y))
+  (unit))
+(rule (bound x (var y))
+  (if-let _ (strneq x y))
+  (unit))
+
+(decl extern prime (str) str)
+(constructor prime "Prime")
+
+;; (decl fresh (str E) str)
+;; (rule 1 (fresh x e)
+;;   (if-let _ (free x e))
+;;   (fresh (prime x) e))
+;; (rule (fresh x e)
+;;   (identity x))
+(decl fresh (str E) str)
+(rule 1 (fresh x e)
+  (if-let _ (bound x e))
+  (identity x))
+(rule (fresh x e)
+  (fresh (prime x) e))
+
+;; alpha-convert \x.e -> \x'.e; (alpha x x' expr)
+(decl alpha (str str E) E)
+;; shadowing
+(rule 2 (alpha x x e) (identity e))
+(rule 1 (alpha x xx (@ f (lam x e))) (identity f))
+(rule (alpha x xx (lam y e))
+  (lam y (alpha x xx e)))
+(rule 1 (alpha x xx (var x)) (var xx))
+(rule (alpha x xx (@ y (var yy))) (identity y))
+(rule (alpha x xx (app M N)) (app (alpha x xx M) (alpha x xx N)))
+
 (decl subst (str E E) E)
-
 (rule 3 (subst x e1 (var x)) (identity e1))
-
 (rule 2 (subst x e1 (@ y (var yy))) (identity y))
-
 ;; shadowing
 (rule 1 (subst x e1 (@ f (lam x e2))) (identity f))
-
-(rule (subst x e1 (lam y e2)) (lam y (subst x e1 e2)))
-
+;; capture-avoiding substitution
+(rule (subst x e1 (@ f (lam y e2)))
+  (let ((yy (fresh y e1)))
+    (lam yy (subst x e1 (alpha y yy e2)))))
 (rule (subst x e1 (app f y)) (app (subst x e1 f) (subst x e1 y)))
 
 ;; eval
@@ -40,32 +98,22 @@
 ;; call-by-value
 (decl eval_cbv (E) E)
 
-(rule 2 (eval_cbv (app (lam x e) (@ g (lam _ _))))
+(rule 3 (eval_cbv (app (lam x e) (@ g (lam _ _))))
   (eval_cbv (subst x g e)))
-
-(rule 1 (eval_cbv (app (@ f (lam x e1)) e2))
+(rule 2 (eval_cbv (app (@ f (lam x e1)) e2))
   (eval_cbv (app f (eval_cbv e2))))
-
 (rule 1 (eval_cbv (app f x))
   (eval_cbv (app (eval_cbv f) x)))
-
 (rule (eval_cbv e)
   (identity e))
 
-;; TODO broken
-
 ;; normal order
-(decl eval_normal (E) E)
-
-;; (\x.e1) e2 => e1[e2/x]
-
-(rule 2 (eval_normal (app (lam x e) y)) (eval_normal (subst x y e)))
-
-;; (rule 1 (eval_normal (app f x)) (eval_normal (app (eval_normal f) x)))
-
-(rule (eval_normal (lam x e)) (lam x (eval_normal e)))
-
-(rule (eval_normal e) (identity e))
+(decl evaln (E) E)
+(rule 1 (evaln (app (lam x e) N)) (evaln (subst x N e)))
+(rule 1 (evaln (app (@ x (var xx)) N)) (app x (evaln N)))
+(rule (evaln (app M N)) (evaln (app (evaln M) N)))
+(rule (evaln (lam x e)) (lam x (evaln e)))
+(rule (evaln (@ x (var xx))) (identity x))
 
 (decl eval (E) E)
-(rule (eval e) (eval_cbv e))
+(rule (eval e) (evaln e))

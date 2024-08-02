@@ -5,19 +5,20 @@
 #include <tuple>
 #include <variant>
 
-// using str = std::string;
-class str;
+using str = std::string;
+using unit = std::tuple<>;
+// class str;
 struct Lam;
 struct App;
 
 using E = std::variant<str, Lam, App>;
 
-class str : public std::string {
-  using std::string::string;
+// class str : public std::string {
+//   using std::string::string;
 
-public:
-  operator std::shared_ptr<E>() const { return std::make_shared<E>(*this); }
-};
+// public:
+//   operator std::shared_ptr<E>() const { return std::make_shared<E>(*this); }
+// };
 
 struct Lam {
   str var;
@@ -66,11 +67,20 @@ E MakeApp(const E &func, const E &arg) {
   return App{std::make_shared<E>(func), std::make_shared<E>(arg)};
 }
 
+E MakeVar(const str &name) { return name; }
+
 template <typename T> T Identity(T &&t) { return t; }
 template <typename T> T force(T &&t) { return t; }
 template <typename T> T force(std::optional<T> &&t) { return t.value(); }
 
-#include "lambda_gen.cpp"
+std::optional<unit> StrNeq(const str &x, const str &y) {
+  if (x == y) {
+    return {};
+  }
+  return std::make_tuple();
+}
+
+str Prime(const str &x) { return x + "'"; }
 
 template <class... Ts> struct Visitor : Ts... {
   using Ts::operator()...;
@@ -94,28 +104,36 @@ std::ostream &operator<<(std::ostream &os, const E &e) {
                     e);
 }
 
+#include "lambda_gen.cpp"
+
 int main() {
+  auto S = [](const std::string &s) { return std::make_shared<E>(s); };
   // auto fst = std::make_shared<E>(
   //     Lam{"x", std::make_shared<E>(Lam{"y", std::make_shared<E>("x")})});
   // auto snd = std::make_shared<E>(
   //     Lam{"x", std::make_shared<E>(Lam{"y", std::make_shared<E>("y")})});
   // auto id1 = std::make_shared<E>(Lam{"x", std::make_shared<E>("x")});
   // auto id2 = std::make_shared<E>(Lam{"y", std::make_shared<E>("y")});
-  auto zero = Lam{"f", Lam{"x", str("x")}};
+  auto zero = Lam{"f", Lam{"x", S("x")}};
   // auto succ =
   //     Lam{"n", Lam{"f", Lam{"x", App{App{str("n"), str("f")}, str("x")}}}};
-  auto succ =
-      Lam{"n", Lam{"f", Lam{"x", App{str("f"),
-                                     App{App{str("n"), str("f")}, str("x")}}}}};
-  auto id1 = Lam{"x", str("x")};
-  auto id2 = Lam{"y", str("y")};
+  auto succ = Lam{
+      "n", Lam{"f", Lam{"x", App{S("f"), App{App{S("n"), S("f")}, S("x")}}}}};
+  auto id1 = Lam{"x", S("x")};
+  auto id2 = Lam{"y", S("y")};
   // App app = App{id2, id1};
   // need alpha conversion?
   App one = App{succ, zero};
   App two = App{succ, one};
 
+  // auto capture = Lam{"x", Lam{"y", App{Lam{"x", S("y")}, S("x")}}};
+  auto capture = Lam{"x", App{Lam{"y", Lam{"x", S("y")}}, S("x")}};
+
   auto res = construct_eval(one);
   std::cout << one << " => " << res.value() << std::endl;
+
+  res = construct_eval(capture);
+  std::cout << capture << " => " << *res << std::endl;
 
   return 0;
 }
